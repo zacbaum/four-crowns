@@ -21,6 +21,30 @@ function freshDB() {
 }
 
 /**
+ * Validate a round's optional meld data: [playerMelds0, playerMelds1], each an
+ * array of melds, each meld 3-4 card ids (0-51). A soft field — anything
+ * malformed returns null and the round is kept without melds (real-card /
+ * pre-update games never have it).
+ * @param {unknown} m
+ * @returns {number[][][]|null}
+ */
+function normalizeMelds(m) {
+  if (!Array.isArray(m) || m.length !== 2) return null;
+  const out = [];
+  for (const playerMelds of m) {
+    if (!Array.isArray(playerMelds)) return null;
+    const melds = [];
+    for (const meld of playerMelds) {
+      if (!Array.isArray(meld) || meld.length < 3 || meld.length > 4) return null;
+      if (!meld.every((c) => Number.isInteger(c) && c >= 0 && c < 52)) return null;
+      melds.push([...meld]);
+    }
+    out.push(melds);
+  }
+  return out;
+}
+
+/**
  * Validate + normalize one game record.
  * Returns a normalized copy, or null if the record is unusable.
  * Hard requirements: id, dateISO, kind, players[2], rounds[], totals[2].
@@ -44,10 +68,12 @@ function normalizeGame(g) {
     if (!r || typeof r !== 'object' || !ROUND_NUMBERS.has(r.round)) return null;
     if (!Array.isArray(r.scores) || r.scores.length !== 2
       || !r.scores.every(Number.isFinite)) return null;
+    const melds = normalizeMelds(r.melds);
     rounds.push({
       round: r.round,
       scores: [r.scores[0], r.scores[1]],
       wentOut: (r.wentOut === 0 || r.wentOut === 1) ? r.wentOut : null,
+      ...(melds ? { melds } : {}),
     });
   }
   return {

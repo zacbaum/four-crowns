@@ -116,6 +116,11 @@ export function buildGameRecord(state, adapters, id, finished) {
       round: r.round,
       scores: [r.scores[0], r.scores[1]],
       wentOut: r.wentOut,
+      // Final meld arrangement per player (arrays of card ids 0-51) — feeds
+      // the meld-trends analytics. The wild rank is recoverable from `round`.
+      ...(r.arrangements
+        ? { melds: r.arrangements.map(a => a.melds.map(m => m.slice())) }
+        : {}),
     })),
     totals: [state.totals[0], state.totals[1]],
     winner: finished ? state.winner : null,
