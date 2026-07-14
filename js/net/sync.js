@@ -155,12 +155,17 @@ export function validateMessage(raw) {
   switch (m.t) {
     case 'hello': {
       if (typeof m.name !== 'string' || m.name.trim() === '') return null;
-      return { t: 'hello', name: m.name.trim().slice(0, 24) };
+      const out = { t: 'hello', name: m.name.trim().slice(0, 24) };
+      // Optional resume handshake: the guest offers its saved-state fingerprint.
+      if (typeof m.fp === 'string' && m.fp.length <= 40) out.fp = m.fp;
+      return out;
     }
     case 'start': {
       const config = validConfig(m.config);
       if (!config) return null;
-      return { t: 'start', config, guestSeat: 1 };
+      const out = { t: 'start', config, guestSeat: 1 };
+      if (m.resume === true) out.resume = true;
+      return out;
     }
     case 'action': {
       const action = validAction(m.action);
@@ -253,20 +258,31 @@ function openPeer(Peer, id) {
  *   - lock: stop accepting new guest connections (call once the game starts)
  *   - close: tear down the connection and the peer
  */
-export async function createRoom(onEvent) {
+export async function createRoom(onEvent, opts = {}) {
   const Peer = await loadPeerJS();
   let lastErr = null;
+  // opts.code pins the room code (resume: the guest knows this code). The old
+  // peer id can linger on the broker briefly after a drop, so retry it with
+  // small backoffs before giving up.
+  const fixed = typeof opts.code === 'string' && opts.code ? opts.code : null;
   for (let attempt = 0; attempt < 5; attempt++) {
-    const code = randomRoomCode();
+    const code = fixed || randomRoomCode();
     let peer;
     try {
       peer = await openPeer(Peer, PEER_ID_PREFIX + code);
     } catch (err) {
       lastErr = err;
-      if (err && err.type === 'unavailable-id') continue; // collision: new code
+      if (err && err.type === 'unavailable-id') {
+        if (!fixed) continue; // collision: new random code
+        await new Promise((r) => setTimeout(r, 1200 * (attempt + 1)));
+        continue; // resume: wait for the broker to release our old id
+      }
       throw friendlyError(err);
     }
     return hostRoom(peer, code, onEvent);
+  }
+  if (fixed && lastErr && lastErr.type === 'unavailable-id') {
+    throw new Error('The old room is still closing down — try Resume again in a minute.');
   }
   throw friendlyError(lastErr);
 }

@@ -5,7 +5,7 @@
  * to invalidate; activate cleans old caches.
  */
 
-const CACHE_VERSION = 'v11';
+const CACHE_VERSION = 'v12';
 const CACHE_NAME = `fourcrowns-${CACHE_VERSION}`;
 
 const APP_SHELL = [
@@ -19,6 +19,7 @@ const APP_SHELL = [
   './js/ui/cards-render.js',
   './js/ui/home.js',
   './js/ui/scorekeeper.js',
+  './js/ui/resume.js',
   './js/ui/table.js',
   './js/ui/online.js',
   './js/ui/stats-ui.js',

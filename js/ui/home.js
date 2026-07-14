@@ -4,6 +4,7 @@
 
 import { registerScreen, navigate } from './app.js';
 import { getSettings, saveSettings } from '../stats/store.js';
+import { loadResume, clearResume } from './resume.js';
 
 const AI_LEVELS = ['easy', 'medium', 'hard'];
 let aiLevel = 'medium'; // session-sticky difficulty choice
@@ -31,6 +32,7 @@ registerScreen('home', {
           <p class="tagline">A two-player rummy duel</p>
         </header>
         <section class="menu-list">
+          <div id="resume-slot"></div>
           <div class="card-panel ai-panel">
             <div class="seg" id="ai-seg" role="radiogroup" aria-label="AI difficulty">
               ${AI_LEVELS.map(l => `
@@ -117,6 +119,56 @@ registerScreen('home', {
     container.querySelector('#go-scorekeeper').addEventListener('click', () => navigate('scorekeeper'));
     container.querySelector('#go-stats').addEventListener('click', () => navigate('stats'));
     container.querySelector('#go-rules').addEventListener('click', () => navigate('rules'));
+
+    // In-progress game? Offer to pick it up exactly where it stopped.
+    const saved = loadResume();
+    if (saved) {
+      const s = saved.state;
+      const roundNo = Math.min(s.roundIndex + 1, 10);
+      const slot = container.querySelector('#resume-slot');
+      const panel = document.createElement('div');
+      panel.className = 'card-panel resume-panel';
+      const label = document.createElement('div');
+      label.className = 'resume-label';
+      label.textContent = `${s.config.players[0].name} vs ${s.config.players[1].name}`
+        + ` — round ${roundNo} of 10, ${s.totals[0]}–${s.totals[1]}`
+        + (saved.kind === 'online' ? ' (online)' : '');
+      panel.appendChild(label);
+      const rowBtns = document.createElement('div');
+      rowBtns.className = 'resume-btns';
+      const go = document.createElement('button');
+      go.type = 'button';
+      go.className = 'btn btn-primary';
+      go.innerHTML = '<span class="btn-icon">▶</span> Resume game';
+      go.addEventListener('click', () => {
+        if (saved.kind === 'online') {
+          navigate('online', { resume: saved });
+        } else {
+          navigate('table', {
+            config: s.config,
+            adapters: [{ kind: 'local' }, { kind: 'ai', level: saved.aiLevel || 'medium' }],
+            localSeat: 0,
+            resumeState: s,
+            resumeGameId: saved.gameId,
+            resumeHandOrder: saved.handOrder,
+            resumeOrderRound: saved.orderRound,
+          });
+        }
+      });
+      const drop = document.createElement('button');
+      drop.type = 'button';
+      drop.className = 'btn resume-drop';
+      drop.textContent = 'Discard';
+      drop.addEventListener('click', () => {
+        if (!window.confirm('Throw away the saved game? This cannot be undone.')) return;
+        clearResume();
+        panel.remove();
+      });
+      rowBtns.appendChild(go);
+      rowBtns.appendChild(drop);
+      panel.appendChild(rowBtns);
+      slot.appendChild(panel);
+    }
   },
 });
 

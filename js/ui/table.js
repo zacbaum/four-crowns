@@ -22,8 +22,9 @@ import { registerScreen, navigate, toast } from './app.js';
 import { card as renderCard, handRow } from './cards-render.js';
 import { createGame, applyAction, legalActions } from '../engine/game.js';
 import { bestArrangement, shapesFor } from '../engine/solver.js';
-import { ROUNDS, RANK_NAMES, rank, cardName, cardPoints, mulberry32 } from '../engine/cards.js';
+import { ROUNDS, RANK_NAMES, rank, suit, cardName, cardPoints, mulberry32 } from '../engine/cards.js';
 import { saveGame } from '../stats/store.js';
+import { saveResume, clearResume } from './resume.js';
 
 /* ------------------------------------------------------------------ */
 /* Pure helpers (no DOM) — exported for node sanity tests              */
@@ -31,6 +32,10 @@ import { saveGame } from '../stats/store.js';
 
 const MELD_COLORS = ['#e9c46a', '#7ec8a9', '#9ec5ff', '#eaa9dd'];
 const GROUP_GAP = 12; // extra px between meld groups / deadwood in the hand row
+
+/** Display suit order, left to right: ♠ ♣ ♦ ♥ (engine suit ids 0,3,2,1). */
+const SUIT_WEIGHT = [0, 3, 2, 1];
+const suitW = (c) => SUIT_WEIGHT[suit(c)];
 
 /**
  * Solver-backed display arrangement of a hand: melds first (each sorted by
@@ -50,10 +55,11 @@ export function arrangeHand(hand, wildRank, mode) {
   if (mode === 'hard' && shapesFor(hand.length).length === 0) effMode = 'normal';
   const arr = bestArrangement(hand, wildRank, effMode);
   const melds = arr.melds.map(m => displayMeld(m, wildRank));
-  melds.sort((a, b) => rank(b[0]) - rank(a[0]) || a[0] - b[0]);
+  melds.sort((a, b) => rank(b[0]) - rank(a[0]) || suitW(a[0]) - suitW(b[0]));
   const deadwood = arr.deadwood
     .slice()
-    .sort((a, b) => cardPoints(b, wildRank) - cardPoints(a, wildRank) || a - b);
+    .sort((a, b) => cardPoints(b, wildRank) - cardPoints(a, wildRank)
+      || suitW(a) - suitW(b));
   return { melds, deadwood, points: arr.points };
 }
 
@@ -72,10 +78,11 @@ export function displayMeld(meld, wildRank) {
   const naturals = meld.filter((c) => rank(c) !== wildRank);
   const wilds = meld.filter((c) => rank(c) === wildRank);
   const distinct = new Set(naturals.map(rank));
+  const bySuit = (a, b) => suitW(a) - suitW(b);
   // Group (incl. all-wild-rank, which is a natural group of the wild rank):
-  if (naturals.length === 0) return meld.slice().sort((a, b) => a - b);
+  if (naturals.length === 0) return meld.slice().sort(bySuit);
   if (distinct.size === 1) {
-    return naturals.sort((a, b) => a - b).concat(wilds.sort((a, b) => a - b));
+    return naturals.sort(bySuit).concat(wilds.sort(bySuit));
   }
   // Run: pick the highest window [lo .. lo+n-1] that still contains every
   // natural rank and stays within A..K, so spare wilds land at the top.
@@ -83,7 +90,7 @@ export function displayMeld(meld, wildRank) {
   const ranks = naturals.map(rank);
   const lo = Math.min(Math.min(...ranks), 14 - n);
   const byRank = new Map(naturals.map((c) => [rank(c), c]));
-  const spareWilds = wilds.slice();
+  const spareWilds = wilds.slice().sort(bySuit).reverse(); // ♠ pops first
   const out = [];
   for (let r = lo + n - 1; r >= lo; r--) {
     out.push(byRank.has(r) ? byRank.get(r) : spareWilds.pop());
@@ -568,16 +575,18 @@ export function startTable(container, opts) {
   const onGameEnd = typeof opts.onGameEnd === 'function' ? opts.onGameEnd : () => navigate('stats');
   const aiRng = mulberry32(((opts.config.seed | 0) ^ 0x9e3779b9) | 0);
 
-  let state = createGame(opts.config);
-  let gameId = newGameId();
+  // Resuming: a saved engine state replaces the fresh deal, and the stats
+  // record id is reused so finishing later upgrades the same record.
+  let state = opts.resumeState || createGame(opts.config);
+  let gameId = opts.resumeGameId || newGameId();
   let sel = null;          // selected card id during the local discard phase
   let scoresOpen = false;  // score-sheet bottom drawer
   let quitOpen = false;    // quit confirm dialog
   let saved = false;       // finished game already persisted?
   let disposed = false;
   let suppressClick = false; // swallow the click that follows a drag
-  let handOrder = [];      // the local player's own card arrangement
-  let orderRound = -1;     // which roundIndex handOrder belongs to
+  let handOrder = Array.isArray(opts.resumeHandOrder) ? opts.resumeHandOrder.slice() : [];
+  let orderRound = Number.isInteger(opts.resumeOrderRound) ? opts.resumeOrderRound : -1;
   let sortAnimFrom = null; // previous visual order to FLIP-animate from
   let sortAnimDelay = 420; // hold before the glide (long at deal, short on keep)
   let dragging = false;    // a hand-card drag is in flight
@@ -716,6 +725,21 @@ export function startTable(container, opts) {
   }
 
   /* ---- persistence ---- */
+
+  // In-progress persistence: AI games save themselves; online games save with
+  // the metadata online.js provides (seat, room code) so peers can reconnect.
+  const aiAdapter = adapters.find((a) => a && a.kind === 'ai');
+  const resumeMeta = opts.resumeMeta
+    || (aiAdapter && seatIsLocal ? { kind: 'ai', aiLevel: aiAdapter.level } : null);
+
+  function persistResume() {
+    if (!resumeMeta || disposed) return;
+    if (state.phase === 'gameOver') {
+      clearResume(); // finished games are in the stats, not the resume slot
+      return;
+    }
+    saveResume({ ...resumeMeta, state, gameId, handOrder, orderRound });
+  }
 
   function persistFinished() {
     if (saved) return;
@@ -1374,6 +1398,7 @@ export function startTable(container, opts) {
 
     container.replaceChildren(root);
     runSortAnimation();
+    persistResume();
   }
 
   /**

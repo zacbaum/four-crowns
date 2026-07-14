@@ -23,7 +23,7 @@ contract.
 |------|-------|
 | engine | `js/engine/cards.js`, `js/engine/solver.js`, `js/engine/game.js`, `tests/solver.test.mjs`, `tests/game.test.mjs` |
 | ai | `js/ai/ai.js`, `tests/ai.test.mjs` |
-| ui-foundation | `index.html`, `css/app.css`, `js/ui/app.js`, `js/ui/cards-render.js`, `js/ui/home.js`, `js/ui/scorekeeper.js`, `js/main.js`, `manifest.webmanifest`, `sw.js` |
+| ui-foundation | `index.html`, `css/app.css`, `js/ui/app.js`, `js/ui/cards-render.js`, `js/ui/home.js`, `js/ui/scorekeeper.js`, `js/ui/resume.js`, `js/main.js`, `manifest.webmanifest`, `sw.js` |
 | table | `js/ui/table.js` |
 | net | `js/net/sync.js`, `js/ui/online.js`, `js/vendor/peerjs.min.js` |
 | stats | `js/stats/store.js`, `js/stats/analytics.js`, `js/ui/stats-ui.js`, `tests/analytics.test.mjs` |
@@ -218,8 +218,11 @@ originated remotely).
 - Room codes: 5 uppercase letters (no ambiguous chars), peer id
   `four-crowns-<CODE>`. Host creates game (chooses seed + config), guest joins.
 - Protocol (JSON messages):
-  - guest -> host: `{t:'hello', name}`
-  - host -> guest: `{t:'start', config, guestSeat: 1}`
+  - guest -> host: `{t:'hello', name, fp?}` (fp: saved-state fingerprint when
+    reconnecting into a saved game)
+  - host -> guest: `{t:'start', config, guestSeat: 1, resume?: true}`
+    (resume handshake: if the guest's fp doesn't match the host's saved state,
+    the host sends `{t:'state', state}` first — host state wins)
   - both: `{t:'action', action}` — sender already applied it locally; receiver
     applies via `applyAction`. Determinism (same seed) keeps states identical.
   - both: `{t:'bye'}` on quit.

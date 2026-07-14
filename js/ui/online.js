@@ -14,9 +14,10 @@
  */
 
 import { registerScreen, navigate, toast } from './app.js';
-import { getSettings, saveSettings, saveGame } from '../stats/store.js';
+import { getSettings, saveSettings } from '../stats/store.js';
 import { createRoom, joinRoom, normalizeRoomCode, isValidRoomCode } from '../net/sync.js';
 import { createGame, applyAction } from '../engine/game.js';
+import { stateFingerprint } from './resume.js';
 
 /* ------------------------------------------------------------------ */
 /* Styles (injected once; "on-" prefix; reuses app.css tokens)         */
@@ -89,7 +90,7 @@ const topbarHTML = (title) => `
 /* ------------------------------------------------------------------ */
 
 registerScreen('online', {
-  mount(container) {
+  mount(container, params) {
     injectStyle();
 
     let settings = { playerName: 'You', hardMode: false };
@@ -106,6 +107,9 @@ registerScreen('online', {
     const dispatch = (ev) => onNetEvent(ev);
 
     const hostState = { guestName: null, connected: false };
+    let joinedCode = null;        // the room code this guest joined with
+    let adoptedState = null;      // host-sent state during a resume handshake
+    let resumeSaved = null;       // this guest's own saved game (resume flow)
 
     function closeRoom(sendBye) {
       if (!room) return;
@@ -290,7 +294,94 @@ registerScreen('online', {
         renderHosting();
         return;
       }
-      enterGame(config, 0);
+      enterGame(config, 0, room.code);
+    }
+
+    /* ---------------------- resume (both seats) ------------------ */
+
+    async function startResumeHost(saved) {
+      const my = ++seq;
+      renderStatus('Resume Game', `Re-opening room ${saved.roomCode}…`, () => {
+        seq++;
+        navigate('home');
+      });
+      let created;
+      try {
+        created = await createRoom(dispatch, { code: saved.roomCode });
+      } catch (err) {
+        if (disposed || my !== seq) return;
+        toast(err.message || 'Could not re-open the room.');
+        navigate('home');
+        return;
+      }
+      if (disposed || my !== seq) {
+        try { created.close(); } catch (e) { /* ignore */ }
+        return;
+      }
+      room = created;
+      const myFp = stateFingerprint(saved.state);
+      onNetEvent = (ev) => {
+        if (ev.type === 'message' && ev.msg.t === 'hello') {
+          // Same saved game on both sides -> just restart play. Different (or
+          // missing) on their side -> ship them our copy first; host wins.
+          if (ev.msg.fp !== myFp) room.send({ t: 'state', state: saved.state });
+          room.lock();
+          if (!room.send({ t: 'start', config: saved.state.config, guestSeat: 1, resume: true })) {
+            toast('Could not reach your opponent. Try Resume again.');
+            return;
+          }
+          enterGame(saved.state.config, 0, saved.roomCode, saved);
+        } else if (ev.type === 'error') {
+          toast(ev.message);
+        }
+      };
+      renderResumeWaiting(saved);
+    }
+
+    function renderResumeWaiting(saved) {
+      if (disposed || !room) return;
+      container.innerHTML = `
+        <div class="screen">
+          ${topbarHTML('Resume Game')}
+          <section class="card-panel on-code-panel">
+            <div class="on-hint">Room code</div>
+            <div class="on-code">${esc(room.code)}</div>
+            <div class="on-hint">Ask ${esc(saved.state.config.players[1].name)} to tap
+              Resume on their home screen (or Join with this code)</div>
+          </section>
+          <div class="on-status"><span class="on-spinner"></span><span>Waiting to reconnect…</span></div>
+        </div>`;
+      container.querySelector('#on-back').addEventListener('click', () => {
+        closeRoom(true);
+        navigate('home');
+      });
+    }
+
+    async function startResumeGuest(saved) {
+      resumeSaved = saved;
+      const my = ++seq;
+      onNetEvent = guestLobbyEvent;
+      renderStatus('Resume Game', `Rejoining ${saved.roomCode}… (the host must tap Resume first)`, () => {
+        seq++;
+        navigate('home');
+      });
+      let joined;
+      try {
+        joined = await joinRoom(saved.roomCode, dispatch);
+      } catch (err) {
+        if (disposed || my !== seq) return;
+        toast((err.message || 'Could not rejoin.') + ' Ask the host to tap Resume, then try again.');
+        navigate('home');
+        return;
+      }
+      if (disposed || my !== seq) {
+        try { joined.close(); } catch (e) { /* ignore */ }
+        return;
+      }
+      room = joined;
+      joinedCode = saved.roomCode;
+      room.send({ t: 'hello', name: myName, fp: stateFingerprint(saved.state) });
+      renderGuestWaiting(saved.roomCode);
     }
 
     /* -------------------------- guest -------------------------- */
@@ -333,6 +424,7 @@ registerScreen('online', {
 
     async function startJoining(code) {
       const my = ++seq;
+      joinedCode = normalizeRoomCode(code);
       onNetEvent = guestLobbyEvent;
       renderStatus('Join Game', `Joining ${code}…`, () => {
         seq++;
@@ -357,8 +449,28 @@ registerScreen('online', {
     }
 
     function guestLobbyEvent(ev) {
-      if (ev.type === 'message' && ev.msg.t === 'start') {
-        enterGame(ev.msg.config, 1);
+      if (ev.type === 'message' && ev.msg.t === 'state') {
+        // Resume handshake: the host's copy of the game (sent when our saved
+        // fingerprint didn't match, or we had nothing saved). Host state wins.
+        adoptedState = ev.msg.state;
+      } else if (ev.type === 'message' && ev.msg.t === 'start') {
+        if (ev.msg.resume) {
+          const state = adoptedState || (resumeSaved && resumeSaved.state);
+          if (!state) {
+            toast('Nothing to resume — ask the host to start a new game.');
+            closeRoom(true);
+            renderLanding();
+            return;
+          }
+          enterGame(ev.msg.config, 1, joinedCode, {
+            state,
+            gameId: (resumeSaved && resumeSaved.gameId) || crypto.randomUUID(),
+            handOrder: resumeSaved ? resumeSaved.handOrder : [],
+            orderRound: resumeSaved ? resumeSaved.orderRound : -1,
+          });
+        } else {
+          enterGame(ev.msg.config, 1, joinedCode);
+        }
       } else if ((ev.type === 'message' && ev.msg.t === 'bye') || ev.type === 'closed') {
         toast('The host left the game.');
         closeRoom(false);
@@ -396,57 +508,35 @@ registerScreen('online', {
      * navigate to the table screen.
      * @param {object} config - createGame config (host-built or received)
      * @param {0|1} seat - this device's seat
+     * @param {string} roomCode - the room code (for mid-game resume saves)
+     * @param {object|null} [resume] - {state, gameId, handOrder, orderRound}
+     *   when reconnecting into a previously saved game
      */
-    function enterGame(config, seat) {
+    function enterGame(config, seat, roomCode, resume = null) {
       handedOff = true;
       seq++;
       const gameRoom = room;
       room = null;
-      const gameId = crypto.randomUUID();
       // Shadow copy: replays every action so we can drop duplicates and
       // save partial results. The table owns the authoritative state.
-      const shadow = createGame(JSON.parse(JSON.stringify(config)));
+      const shadow = resume
+        ? JSON.parse(JSON.stringify(resume.state))
+        : createGame(JSON.parse(JSON.stringify(config)));
       let remoteHandler = null;
       const queuedRemote = []; // actions that arrive before the table mounts
       let over = false;
-
-      function saveRecord(roundResults, totals, winner, finished) {
-        try {
-          saveGame({
-            id: gameId,
-            dateISO: new Date().toISOString(),
-            kind: 'online',
-            aiLevel: null,
-            hardMode: config.mode === 'hard',
-            players: [config.players[0].name, config.players[1].name],
-            rounds: roundResults.map((r) => ({
-              round: r.round,
-              scores: [r.scores[0], r.scores[1]],
-              wentOut: r.wentOut,
-            })),
-            totals: [totals[0], totals[1]],
-            winner,
-            finished,
-          });
-        } catch (err) {
-          console.error('four-crowns: failed to save online game', err);
-        }
-      }
-      const saveUnfinished = () =>
-        saveRecord(shadow.roundResults, shadow.totals, null, false);
 
       function peerGone(message) {
         if (over) return;
         over = true;
         try { gameRoom.close(); } catch (err) { /* already dead */ }
         toast(message);
-        const save = window.confirm(
-          `${message}\n\nSave this game as unfinished and go home?`
+        const goHome = window.confirm(
+          `${message}\n\nThe game is saved — when you're both ready, `
+          + 'tap Resume on the home screen to reconnect and keep playing.\n\n'
+          + 'Go home now?'
         );
-        if (save) {
-          saveUnfinished();
-          navigate('home');
-        }
+        if (goHome) navigate('home');
         // Otherwise stay on the table (view-only); quitting there still works.
       }
 
@@ -504,6 +594,15 @@ registerScreen('online', {
           ? [{ kind: 'local' }, remoteAdapter]
           : [remoteAdapter, { kind: 'local' }],
         localSeat: seat,
+        // Mid-game resume saves (the table persists after every action) need
+        // the room code + seat so either peer can reconnect from home.
+        resumeMeta: { kind: 'online', seat, roomCode, playerName: myName },
+        ...(resume ? {
+          resumeState: resume.state,
+          resumeGameId: resume.gameId,
+          resumeHandOrder: resume.handOrder,
+          resumeOrderRound: resume.orderRound,
+        } : {}),
         // The table screen is the single owner of stats persistence (it saves
         // via buildGameRecord on both the finish and quit paths, deriving
         // kind:'online' from the remote adapter). We must NOT save again here
@@ -526,7 +625,14 @@ registerScreen('online', {
 
     /* ----------------------------- go --------------------------- */
 
-    renderLanding();
+    if (params && params.resume && params.resume.kind === 'online') {
+      // Reconnect into a saved game: the original host re-opens the room
+      // under the same code; the guest rejoins it.
+      if (params.resume.seat === 0) startResumeHost(params.resume);
+      else startResumeGuest(params.resume);
+    } else {
+      renderLanding();
+    }
 
     return () => {
       disposed = true;

@@ -313,6 +313,13 @@ button {
 .home-screen .menu-list { margin-bottom: 16px; }
 .ai-panel { display: grid; gap: 10px; }
 
+/* Resume-in-progress panel */
+.resume-panel { display: grid; gap: 10px; border: 1.5px solid var(--accent); }
+.resume-label { font-size: 14px; color: var(--ink-2); }
+.resume-btns { display: flex; gap: 8px; }
+.resume-btns .btn-primary { flex: 1; }
+.resume-drop { flex: 0 0 auto; }
+
 .settings-panel { margin-top: 4px; }
 
 /* ---- Rules screen ---- */
