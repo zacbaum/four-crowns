@@ -49,12 +49,46 @@ export function arrangeHand(hand, wildRank, mode) {
   let effMode = mode;
   if (mode === 'hard' && shapesFor(hand.length).length === 0) effMode = 'normal';
   const arr = bestArrangement(hand, wildRank, effMode);
-  const melds = arr.melds.map(m => m.slice().sort((a, b) => rank(a) - rank(b) || a - b));
-  melds.sort((a, b) => rank(a[0]) - rank(b[0]) || a[0] - b[0]);
+  const melds = arr.melds.map(m => displayMeld(m, wildRank));
+  melds.sort((a, b) => rank(b[0]) - rank(a[0]) || a[0] - b[0]);
   const deadwood = arr.deadwood
     .slice()
     .sort((a, b) => cardPoints(b, wildRank) - cardPoints(a, wildRank) || a - b);
   return { melds, deadwood, points: arr.points };
+}
+
+/**
+ * Order a meld's cards for display. Runs read highest (left) to lowest
+ * (right) with any wilds shown in the run position they fill: natural cards
+ * sit at their own rank, forced interior gaps take wilds, and spare wilds
+ * extend the run at the HIGH end when the window allows (a wild next to 9-10
+ * reads as the Jack, not the 8). Groups show naturals (suit order) with
+ * wilds on the right.
+ * @param {number[]} meld - 3-4 card ids forming a valid meld
+ * @param {number} wildRank
+ * @returns {number[]} the same cards, display-ordered
+ */
+export function displayMeld(meld, wildRank) {
+  const naturals = meld.filter((c) => rank(c) !== wildRank);
+  const wilds = meld.filter((c) => rank(c) === wildRank);
+  const distinct = new Set(naturals.map(rank));
+  // Group (incl. all-wild-rank, which is a natural group of the wild rank):
+  if (naturals.length === 0) return meld.slice().sort((a, b) => a - b);
+  if (distinct.size === 1) {
+    return naturals.sort((a, b) => a - b).concat(wilds.sort((a, b) => a - b));
+  }
+  // Run: pick the highest window [lo .. lo+n-1] that still contains every
+  // natural rank and stays within A..K, so spare wilds land at the top.
+  const n = meld.length;
+  const ranks = naturals.map(rank);
+  const lo = Math.min(Math.min(...ranks), 14 - n);
+  const byRank = new Map(naturals.map((c) => [rank(c), c]));
+  const spareWilds = wilds.slice();
+  const out = [];
+  for (let r = lo + n - 1; r >= lo; r--) {
+    out.push(byRank.has(r) ? byRank.get(r) : spareWilds.pop());
+  }
+  return out;
 }
 
 /**
@@ -336,6 +370,32 @@ const TB_CSS = `
 .tb-insert-before { box-shadow: -3px 0 0 0 var(--gold, #e9c46a); }
 .tb-insert-after { box-shadow: 3px 0 0 0 var(--gold, #e9c46a); }
 
+/* The card just drawn: gold glow + slight lift until it's placed/discarded */
+.tb-newcard {
+  box-shadow: 0 0 0 2px var(--gold, #e9c46a), 0 0 14px rgba(233, 196, 106, .55);
+  transform: translateY(-6px);
+}
+
+/* Required meld shape for the round, e.g. [3][3][4], filled = already made */
+.tb-shape-row {
+  display: flex; align-items: center; justify-content: center; gap: 6px;
+  margin: 0 0 8px;
+}
+.tb-shape-label {
+  font-size: 11px; letter-spacing: .05em; text-transform: uppercase;
+  color: rgba(255,255,255,.72); margin-right: 2px;
+}
+.tb-shape-chip {
+  min-width: 26px; text-align: center; padding: 3px 8px; border-radius: 8px;
+  font-size: 13px; font-weight: 700; color: rgba(255,255,255,.85);
+  background: rgba(0,0,0,.25); border: 1.5px dashed rgba(255,255,255,.4);
+  font-variant-numeric: tabular-nums;
+}
+.tb-shape-done {
+  border-style: solid; border-color: var(--gold, #e9c46a);
+  background: rgba(233, 196, 106, .24); color: #fff;
+}
+
 .tb-overlay {
   position: fixed; inset: 0; z-index: 300; background: rgba(0,0,0,.55);
   display: flex; align-items: center; justify-content: center; padding: 18px;
@@ -478,6 +538,7 @@ export function startTable(container, opts) {
   let handOrder = [];      // the local player's own card arrangement
   let dragging = false;    // a hand-card drag is in flight
   let pendingRender = false; // a render arrived mid-drag; run it on release
+  let lastDrawn = null;    // the card the local player just drew (until they discard)
   let aiTimer = 0;
   let driveToken = 0;
   let resizeRaf = 0;
@@ -515,6 +576,14 @@ export function startTable(container, opts) {
       toast(err && err.message ? err.message : 'Illegal move');
       render();
       return false;
+    }
+    // Track the local player's fresh draw (the engine appends it to the hand);
+    // it stays highlighted — and outside the meld annotation — until discard.
+    if (action.type === 'draw' && action.player === mySeat && seatIsLocal) {
+      const h = state.hands[mySeat];
+      lastDrawn = h[h.length - 1];
+    } else if (action.type !== 'draw') {
+      lastDrawn = null; // own discard, or a round boundary
     }
     if (!fromRemote) reportLocal(action);
     sel = null;
@@ -615,6 +684,7 @@ export function startTable(container, opts) {
     saved = false;
     sel = null;
     handOrder = [];
+    lastDrawn = null;
     scoresOpen = false;
     quitOpen = false;
     render();
@@ -813,10 +883,30 @@ export function startTable(container, opts) {
     // gap wherever adjacent cards belong to different melds (or deadwood).
     handOrder = mergeOrder(handOrder, hand);
     const ordered = handOrder;
-    const arr = arrangeHand(hand, state.wildRank, state.config.mode);
+
+    // A fresh draw stays OUT of the meld annotation until the player discards:
+    // the underlines keep showing the hand as it was, and the new card sits
+    // highlighted for the player to place — the solver never yanks wilds into
+    // a "helpful" new grouping (2 wilds + a drawn King) uninvited.
+    const freshDraw = canDiscardNow() && lastDrawn != null && hand.includes(lastDrawn)
+      ? lastDrawn : null;
+    const annotBasis = freshDraw != null ? hand.filter((c) => c !== freshDraw) : hand;
+    const arr = arrangeHand(annotBasis, state.wildRank, state.config.mode);
     const groupOf = new Map(); // card id -> meld index, or -1 for deadwood
     arr.melds.forEach((m, i) => m.forEach((c) => groupOf.set(c, i)));
     arr.deadwood.forEach((c) => groupOf.set(c, -1));
+    if (freshDraw != null) groupOf.set(freshDraw, -2); // its own visual group
+
+    // Pill: with a fresh draw in hand, show the best you can get DOWN to —
+    // the minimum over every possible discard.
+    let points = arr.points;
+    if (freshDraw != null) {
+      points = Infinity;
+      for (const c of hand) {
+        const p = arrangeHand(hand.filter((x) => x !== c), state.wildRank, state.config.mode).points;
+        if (p < points) points = p;
+      }
+    }
 
     let boundaries = 0;
     for (let i = 1; i < ordered.length; i++) {
@@ -842,12 +932,51 @@ export function startTable(container, opts) {
         cardEl.classList.add('tb-meldcard');
         cardEl.style.setProperty('--tb-meld-color', MELD_COLORS[g % MELD_COLORS.length]);
       }
+      if (id === freshDraw) cardEl.classList.add('tb-newcard');
       if (i > 0 && g !== groupOf.get(ordered[i - 1])) {
         cardEl.style.marginLeft = `calc(var(--hand-overlap, 8px) + ${GROUP_GAP}px)`;
       }
       attachDrag(cardEl, id); // reorder works even when it's not your turn
     }
-    return { row, points: arr.points };
+    return {
+      row,
+      pointsLabel: freshDraw != null ? `Best after discard: ${points}` : `Points in hand: ${points}`,
+      meldSizes: arr.melds.map((m) => m.length),
+    };
+  }
+
+  /**
+   * The round's required meld shape, e.g. 3·3·4 for the 10s round, with the
+   * slots the player's current melds already fill lit up. When a round has
+   * two shapes (12: 4+4+4 or 3+3+3+3), show whichever the hand is closer to.
+   */
+  function buildShapeChips(meldSizes) {
+    const shapes = shapesFor(state.handSize);
+    if (!shapes.length) return null;
+    const have = {};
+    for (const s of meldSizes) have[s] = (have[s] || 0) + 1;
+    let best = shapes[0];
+    let bestScore = -1;
+    for (const sh of shapes) {
+      const need = {};
+      for (const s of sh) need[s] = (need[s] || 0) + 1;
+      let sc = 0;
+      for (const k in need) sc += Math.min(need[k], have[k] || 0);
+      if (sc > bestScore) { bestScore = sc; best = sh; }
+    }
+    const row = el('div', 'tb-shape-row');
+    row.appendChild(el('span', 'tb-shape-label', 'Melds needed'));
+    const slots = best.slice().sort((a, b) => a - b);
+    const remaining = { ...have };
+    let done = 0;
+    for (const s of slots) {
+      const filled = (remaining[s] || 0) > 0;
+      if (filled) { remaining[s]--; done++; }
+      row.appendChild(el('span', 'tb-shape-chip' + (filled ? ' tb-shape-done' : ''), String(s)));
+    }
+    row.setAttribute('aria-label',
+      `Melds needed this round: ${slots.join(', ')} — ${done} of ${slots.length} made`);
+    return row;
   }
 
   function buildScoreTable(withInPlay) {
@@ -905,7 +1034,7 @@ export function startTable(container, opts) {
     const cardsWrap = el('div', 'tb-reveal-cards');
     const a = res.arrangements[p];
     a.melds
-      .map((m) => m.slice().sort((x, y) => rank(x) - rank(y) || x - y))
+      .map((m) => displayMeld(m, res.wildRank))
       .forEach((m, i) => {
         const g = el('div', 'tb-meld-group');
         g.style.setProperty('--tb-meld-color', MELD_COLORS[i % MELD_COLORS.length]);
@@ -1132,11 +1261,15 @@ export function startTable(container, opts) {
     const me = el('section', 'tb-zone tb-me');
     if (playing && state.turn === mySeat) me.classList.add('tb-active');
     const handWrap = el('div', 'tb-hand-wrap');
-    const { row, points } = buildMyHand();
+    const { row, pointsLabel, meldSizes } = buildMyHand();
+    if (playing) {
+      const chips = buildShapeChips(meldSizes);
+      if (chips) me.appendChild(chips);
+    }
     handWrap.appendChild(row);
     me.appendChild(handWrap);
     const meBar = el('div', 'tb-me-bar');
-    meBar.appendChild(el('span', 'tb-points-pill', `Points in hand: ${points}`));
+    meBar.appendChild(el('span', 'tb-points-pill', pointsLabel));
     if (canDiscardNow()) {
       const discard = el('button', 'btn btn-primary tb-inline', 'Discard');
       discard.type = 'button';
