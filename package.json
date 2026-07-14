@@ -1,0 +1,11 @@
+{
+  "name": "four-crowns",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Two-player Five Crowns variant — PWA with AI opponents, online play, scorekeeper, and analytics",
+  "scripts": {
+    "test": "node --test \"tests/*.test.mjs\"",
+    "serve": "npx -y http-server -p 8123 -c-1 ."
+  }
+}
