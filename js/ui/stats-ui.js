@@ -850,11 +850,11 @@ function totalsOverTimeCard(games, pair) {
   return card;
 }
 
-function distributionCard(games) {
-  const card = chartCard('Caught points per round', 'How much a caught hand cost (nonzero rounds)');
-  const dist = caughtDistribution(games, 5);
+function distributionCard(games, youName) {
+  const card = chartCard('Caught points per round', `How much ${youName}'s caught hands cost (nonzero rounds)`);
+  const dist = caughtDistribution(games, 5, youName);
   if (dist.total === 0) {
-    card.appendChild(h('p', 'st-note', 'No caught hands yet — every scored round was 0.'));
+    card.appendChild(h('p', 'st-note', `No caught rounds for ${youName} in these games.`));
     return card;
   }
   renderBars(card, {
@@ -863,7 +863,7 @@ function distributionCard(games) {
     colors: [SERIES[0]],
     valueFmt: (v) => (v == null ? '—' : String(v)),
     tipTitle: (gi) => `${dist.buckets[gi].label} points`,
-    ariaLabel: `Histogram of caught points per round, ${dist.total} rounds`,
+    ariaLabel: `Histogram of ${youName}'s caught points per round, ${dist.total} rounds`,
     labelMax: true,
   });
   return card;
@@ -1114,7 +1114,7 @@ function render() {
   root.appendChild(trajectoryCard(games));
   root.appendChild(roundAveragesCard(games, pair));
   root.appendChild(totalsOverTimeCard(games, pair));
-  root.appendChild(distributionCard(games));
+  root.appendChild(distributionCard(games, youName));
   root.appendChild(goingOutCard(games, pair));
   const extremes = extremesCard(games, youName);
   if (extremes) root.appendChild(extremes);
