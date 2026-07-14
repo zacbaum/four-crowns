@@ -888,7 +888,7 @@ function totalsOverTimeCard(games, pair) {
 }
 
 function distributionCard(games, youName) {
-  const card = chartCard('Points per round', `${youName}'s per-round scores — the "0" bar is clean/went-out rounds`);
+  const card = chartCard('Points per round', `${youName}'s per-round scores — the "0" bar is rounds you went out`);
   const dist = caughtDistribution(games, 5, youName, true);
   if (dist.total === 0) {
     card.appendChild(h('p', 'st-note', `No rounds recorded for ${youName} in these games.`));
@@ -907,10 +907,10 @@ function distributionCard(games, youName) {
 }
 
 function goingOutCard(games, pair) {
-  const card = chartCard('Going-out rate', 'Share of scored rounds each player went out first');
+  const card = chartCard('Going-out rate', 'Share of rounds each player scored 0');
   const go = goingOutStats(games).filter((e) => pair.includes(e.name));
   if (go.length === 0) {
-    card.appendChild(h('p', 'st-note', 'No going-out data recorded yet.'));
+    card.appendChild(h('p', 'st-note', 'No rounds recorded yet.'));
     return card;
   }
   go.sort((a, b) => pair.indexOf(a.name) - pair.indexOf(b.name));
@@ -924,7 +924,7 @@ function goingOutCard(games, pair) {
 
 function recordsCard(games, youName) {
   const rec = singleRoundRecords(games, youName);
-  if (!rec.worstHand && rec.timesWentOut === 0) return null; // youName not in these games
+  if (rec.totalRounds === 0) return null; // youName not in these games
   const card = chartCard('Your records', `Single-round highs for ${youName}`);
   const grid = h('div', 'st-extremes st-records');
   const box = (label, value, sub) => {
@@ -937,12 +937,10 @@ function recordsCard(games, youName) {
   const wh = rec.worstHand;
   grid.appendChild(box('Worst hand', wh ? `${wh.score} pts` : '—',
     wh ? `round of ${wh.label}s · vs ${truncate(wh.opponent, 10)}` : undefined));
-  // cleanRounds ⊇ timesWentOut: a caught player who fully melds also scores 0,
-  // and imported rounds where both scored 0 have no went-out marker. Showing
-  // both keeps this tile consistent with the histogram's "0" bar.
-  const extraClean = rec.cleanRounds - rec.timesWentOut;
-  grid.appendChild(box('Times gone out', String(rec.timesWentOut),
-    extraClean > 0 ? `+${extraClean} more rounds scored 0` : 'rounds you melded out first'));
+  // "Went out" = scored 0 (matches the histogram's "0" bar and the
+  // going-out-rate chart — who melded out first is never used in metrics).
+  grid.appendChild(box('Gone out', fmtPct(rec.cleanRounds / rec.totalRounds),
+    `${rec.cleanRounds} of ${rec.totalRounds} rounds scored 0`));
   const bh = rec.biggestHit;
   grid.appendChild(box('Biggest hit', bh ? `${bh.score} pts` : '—',
     bh ? `${truncate(bh.opponent, 10)}, round of ${bh.label}s` : undefined));

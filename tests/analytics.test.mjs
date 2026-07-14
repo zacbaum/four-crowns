@@ -254,26 +254,30 @@ test('trajectory: cumulative totals by round', () => {
   assert.deepEqual(trajectory(mkGame({ rounds: [] })), []);
 });
 
-test('goingOutStats: only rounds with wentOut recorded', () => {
+test('goingOutStats: score-based — share of rounds scored 0', () => {
   const go = goingOutStats(GAMES);
   const zac = go.find((p) => p.name === 'Zac');
-  assert.equal(zac.rounds, 11);  // g3 r3 and g4 r4 excluded (wentOut null)
-  assert.equal(zac.wentOut, 7);
-  approx(zac.rate, 7 / 11);
+  assert.equal(zac.rounds, 13);  // every recorded Zac round counts
+  assert.equal(zac.wentOut, 7);  // zeros: g1 r3+r6, g3 r4, g4 r3, g7 r3, g8 r3+r4
+  approx(zac.rate, 7 / 13);
   const bot = go.find((p) => p.name === 'Bot');
-  assert.equal(bot.rounds, 8);
-  assert.equal(bot.wentOut, 3);
-  approx(bot.rate, 3 / 8);
+  assert.equal(bot.rounds, 9);
+  assert.equal(bot.wentOut, 4);  // zeros: g1 r4, g2 r3+r4, g3 r4
+  approx(bot.rate, 4 / 9);
   const maya = go.find((p) => p.name === 'Maya');
-  assert.equal(maya.rounds, 3);
-  assert.equal(maya.wentOut, 1); // g5 r3
-  approx(maya.rate, 1 / 3);
+  assert.equal(maya.rounds, 4);
+  assert.equal(maya.wentOut, 2); // zeros: g4 r4, g5 r3
+  approx(maya.rate, 0.5);
   const alice = go.find((p) => p.name === 'Alice');
   assert.equal(alice.wentOut, 0);
   approx(alice.rate, 0);
+  const bob = go.find((p) => p.name === 'Bob');
+  assert.equal(bob.wentOut, 2);  // scored 0 both g6 rounds
+  approx(bob.rate, 1);
   assert.deepEqual(goingOutStats([]), []);
-  // game whose rounds all lack wentOut contributes nothing
-  assert.deepEqual(goingOutStats([mkGame({ rounds: [{ round: 3, scores: [1, 2], wentOut: null }] })]), []);
+  // the wentOut marker is irrelevant: a null-marker round still counts
+  const only = goingOutStats([mkGame({ rounds: [{ round: 3, scores: [0, 2], wentOut: null }] })]);
+  assert.deepEqual(only.map((e) => [e.name, e.rounds, e.wentOut]), [['Bot', 1, 0], ['Zac', 1, 1]]);
 });
 
 test('caughtDistribution: nonzero scores bucketed', () => {
@@ -310,17 +314,14 @@ test('caughtDistribution: per-player filter + includeZero adds a "0" bar', () =>
   assert.deepEqual(onlyZero.buckets.map((b) => [b.label, b.count]), [['0', 2]]);
 });
 
-test('singleRoundRecords: worst hand, times gone out, biggest hit', () => {
+test('singleRoundRecords: worst hand, went-out share, biggest hit', () => {
   const zac = singleRoundRecords(GAMES, 'Zac');
-  assert.equal(zac.timesWentOut, 7); // rounds where wentOut === Zac's seat
-  // cleanRounds counts score-0 rounds: Zac's 13 rounds have 7 zeros, but one
-  // of them (g3 r4, both 0, wentOut=0=Zac) IS a went-out — total zeros = 7.
+  // score-based going out: 7 zeros out of Zac's 13 recorded rounds
   assert.equal(zac.cleanRounds, 7);
-  // a round can be clean without going out: both-zero round credited to Zac
-  // in g3 means Bot's zero there is clean-but-not-out.
+  assert.equal(zac.totalRounds, 13);
   const bot = singleRoundRecords(GAMES, 'Bot');
-  assert.ok(bot.cleanRounds > bot.timesWentOut,
-    `Bot clean ${bot.cleanRounds} should exceed wentOut ${bot.timesWentOut}`);
+  assert.equal(bot.cleanRounds, 4);
+  assert.equal(bot.totalRounds, 9);
   assert.equal(zac.worstHand.score, 25); // g2 round 4
   assert.equal(zac.worstHand.gameId, 'g2');
   assert.equal(zac.worstHand.round, 4);
@@ -330,13 +331,14 @@ test('singleRoundRecords: worst hand, times gone out, biggest hit', () => {
   assert.equal(zac.biggestHit.opponent, 'Maya');
   // player not in any game -> empty records
   const nobody = singleRoundRecords(GAMES, 'Nobody');
-  assert.equal(nobody.timesWentOut, 0);
   assert.equal(nobody.cleanRounds, 0);
+  assert.equal(nobody.totalRounds, 0);
   assert.equal(nobody.worstHand, null);
   assert.equal(nobody.biggestHit, null);
-  // Alice: only g6, never went out, opponent Bob always scored 0
+  // Alice: only g6, never scored 0, opponent Bob always scored 0
   const alice = singleRoundRecords(GAMES, 'Alice');
-  assert.equal(alice.timesWentOut, 0);
+  assert.equal(alice.cleanRounds, 0);
+  assert.equal(alice.totalRounds, 2);
   assert.equal(alice.worstHand.score, 20);
   assert.equal(alice.biggestHit.score, 0);
 });
