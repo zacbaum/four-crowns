@@ -536,6 +536,8 @@ export function startTable(container, opts) {
   let disposed = false;
   let suppressClick = false; // swallow the click that follows a drag
   let handOrder = [];      // the local player's own card arrangement
+  let orderRound = -1;     // which roundIndex handOrder belongs to
+  let sortAnimFrom = null; // deal order to animate the round-start sort from
   let dragging = false;    // a hand-card drag is in flight
   let pendingRender = false; // a render arrived mid-drag; run it on release
   let lastDrawn = null;    // the card the local player just drew (until they discard)
@@ -684,6 +686,8 @@ export function startTable(container, opts) {
     saved = false;
     sel = null;
     handOrder = [];
+    orderRound = -1;
+    sortAnimFrom = null;
     lastDrawn = null;
     scoresOpen = false;
     quitOpen = false;
@@ -881,7 +885,18 @@ export function startTable(container, opts) {
     // The player owns the card ORDER (drag to rearrange, anytime); the solver
     // still identifies the melds, shown as per-meld underlines plus a small
     // gap wherever adjacent cards belong to different melds (or deadwood).
-    handOrder = mergeOrder(handOrder, hand);
+    // Each round STARTS pre-sorted into the best arrangement (melds grouped,
+    // runs high-to-low, deadwood by points) — animated from the deal order so
+    // the sort is visible — and is the player's to rearrange from there.
+    if (orderRound !== state.roundIndex) {
+      const dealt = arrangeHand(hand, state.wildRank, state.config.mode);
+      const sorted = [...dealt.melds.flat(), ...dealt.deadwood];
+      sortAnimFrom = hand.slice(); // deal order, for the FLIP animation
+      handOrder = sorted;
+      orderRound = state.roundIndex;
+    } else {
+      handOrder = mergeOrder(handOrder, hand);
+    }
     const ordered = handOrder;
 
     // A fresh draw stays OUT of the meld annotation until the player discards:
@@ -1294,6 +1309,39 @@ export function startTable(container, opts) {
     if (quitOpen) root.appendChild(buildQuitConfirm());
 
     container.replaceChildren(root);
+    runSortAnimation();
+  }
+
+  /**
+   * Round-start FLIP: the hand is already rendered in its sorted arrangement;
+   * offset every card back to where it sat in the deal order, hold a beat so
+   * the deal is seen, then glide each card into its group.
+   */
+  function runSortAnimation() {
+    const from = sortAnimFrom;
+    sortAnimFrom = null;
+    if (!from) return;
+    if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    const row = container.querySelector('.tb-hand');
+    if (!row || row.children.length !== from.length) return;
+    const kids = [...row.children];
+    const slots = kids.map((c) => c.getBoundingClientRect().left);
+    const moved = [];
+    for (let i = 0; i < kids.length; i++) {
+      const dealIdx = from.indexOf(handOrder[i]);
+      if (dealIdx === -1 || dealIdx === i) continue;
+      kids[i].style.transition = 'none';
+      kids[i].style.transform = `translateX(${slots[dealIdx] - slots[i]}px)`;
+      moved.push(kids[i]);
+    }
+    if (!moved.length) return;
+    setTimeout(() => {
+      for (const k of moved) {
+        k.style.transition = 'transform .5s cubic-bezier(.22, .9, .3, 1)';
+        k.style.transform = '';
+      }
+      setTimeout(() => { for (const k of moved) k.style.transition = ''; }, 550);
+    }, 420);
   }
 
   /* ---- lifecycle ---- */
