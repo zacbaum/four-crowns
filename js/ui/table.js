@@ -58,6 +58,41 @@ export function arrangeHand(hand, wildRank, mode) {
 }
 
 /**
+ * Merge a user-chosen hand order with the hand's current contents: keep the
+ * user's relative order for cards still held, drop discarded/melded-away
+ * cards, and append newly drawn cards on the right (so a fresh draw is easy
+ * to spot and place).
+ * @param {number[]} prevOrder - last user order (card ids)
+ * @param {number[]} hand - the authoritative current hand
+ * @returns {number[]} every card of `hand`, in user order
+ */
+export function mergeOrder(prevOrder, hand) {
+  const inHand = new Set(hand);
+  const out = prevOrder.filter((c) => inHand.has(c));
+  const seen = new Set(out);
+  for (const c of hand) if (!seen.has(c)) out.push(c);
+  return out;
+}
+
+/**
+ * Reorder: move `id` so it sits at visual slot `insertIdx` (an index into the
+ * CURRENT order, counting gaps: 0 = far left, order.length = far right).
+ * @param {number[]} order
+ * @param {number} id
+ * @param {number} insertIdx
+ * @returns {number[]} new order (input untouched)
+ */
+export function moveCard(order, id, insertIdx) {
+  const cur = order.indexOf(id);
+  if (cur === -1) return order.slice();
+  const out = order.slice();
+  out.splice(cur, 1);
+  const idx = insertIdx > cur ? insertIdx - 1 : insertIdx;
+  out.splice(Math.max(0, Math.min(out.length, idx)), 0, id);
+  return out;
+}
+
+/**
  * Banner text for the current round, e.g. "Round 3 of 10 — 6s".
  * @param {object} state
  * @returns {string}
@@ -297,6 +332,9 @@ const TB_CSS = `
   position: fixed; z-index: 600; pointer-events: none;
   transform: translate(-50%, -70%) rotate(4deg); opacity: .92; margin: 0 !important;
 }
+/* Drop-slot marker while rearranging the hand */
+.tb-insert-before { box-shadow: -3px 0 0 0 var(--gold, #e9c46a); }
+.tb-insert-after { box-shadow: 3px 0 0 0 var(--gold, #e9c46a); }
 
 .tb-overlay {
   position: fixed; inset: 0; z-index: 300; background: rgba(0,0,0,.55);
@@ -437,6 +475,9 @@ export function startTable(container, opts) {
   let saved = false;       // finished game already persisted?
   let disposed = false;
   let suppressClick = false; // swallow the click that follows a drag
+  let handOrder = [];      // the local player's own card arrangement
+  let dragging = false;    // a hand-card drag is in flight
+  let pendingRender = false; // a render arrived mid-drag; run it on release
   let aiTimer = 0;
   let driveToken = 0;
   let resizeRaf = 0;
@@ -573,21 +614,43 @@ export function startTable(container, opts) {
     gameId = newGameId();
     saved = false;
     sel = null;
+    handOrder = [];
     scoresOpen = false;
     quitOpen = false;
     render();
     drive();
   }
 
-  /* ---- drag-to-discard ---- */
+  /* ---- hand-card dragging: reorder anytime, discard on your turn ---- */
+
+  /** Insertion slot (0..n) for a pointer x among the hand row's cards. */
+  function insertIndexAt(row, x) {
+    const kids = [...row.children];
+    for (let i = 0; i < kids.length; i++) {
+      const r = kids[i].getBoundingClientRect();
+      if (x < r.left + r.width / 2) return i;
+    }
+    return kids.length;
+  }
+
+  function clearInsertMarkers(row) {
+    for (const k of row.children) k.classList.remove('tb-insert-before', 'tb-insert-after');
+  }
 
   function attachDrag(cardEl, id) {
     cardEl.addEventListener('pointerdown', (ev) => {
-      if (!canDiscardNow()) return;
       if (ev.button !== undefined && ev.button !== 0) return;
+      const row = cardEl.parentElement;
       const startX = ev.clientX;
       const startY = ev.clientY;
       let ghost = null;
+
+      const overPile = (e, pile) => {
+        if (!pile) return false;
+        const r = pile.getBoundingClientRect();
+        return e.clientX >= r.left - 10 && e.clientX <= r.right + 10 &&
+          e.clientY >= r.top - 10 && e.clientY <= r.bottom + 10;
+      };
 
       const move = (e) => {
         if (!ghost && Math.hypot(e.clientX - startX, e.clientY - startY) > 12) {
@@ -598,12 +661,23 @@ export function startTable(container, opts) {
           ghost.style.setProperty('--card-w', r.width + 'px');
           ghost.style.width = r.width + 'px';
           document.body.appendChild(ghost);
-          const pile = container.querySelector('.tb-pile-discard');
-          if (pile) pile.classList.add('tb-drop-ready');
+          dragging = true;
+          if (canDiscardNow()) {
+            const pile = container.querySelector('.tb-pile-discard');
+            if (pile) pile.classList.add('tb-drop-ready');
+          }
         }
         if (ghost) {
           ghost.style.left = e.clientX + 'px';
           ghost.style.top = e.clientY + 'px';
+          // Insertion marker: a thin line at the slot the card would land in.
+          clearInsertMarkers(row);
+          const pile = container.querySelector('.tb-pile-discard');
+          if (!(canDiscardNow() && overPile(e, pile))) {
+            const idx = insertIndexAt(row, e.clientX);
+            if (idx < row.children.length) row.children[idx].classList.add('tb-insert-before');
+            else if (row.children.length) row.lastElementChild.classList.add('tb-insert-after');
+          }
         }
       };
 
@@ -616,19 +690,32 @@ export function startTable(container, opts) {
           ghost.remove();
           ghost = null;
         }
+        clearInsertMarkers(row);
         const pile = container.querySelector('.tb-pile-discard');
         if (pile) pile.classList.remove('tb-drop-ready');
+        dragging = false;
         if (!wasDrag) return;
         suppressClick = true;
         setTimeout(() => { suppressClick = false; }, 0);
-        if (e.type === 'pointerup' && pile) {
-          const r = pile.getBoundingClientRect();
-          if (
-            e.clientX >= r.left - 10 && e.clientX <= r.right + 10 &&
-            e.clientY >= r.top - 10 && e.clientY <= r.bottom + 10
-          ) {
-            confirmDiscard(id);
+
+        let acted = false;
+        if (e.type === 'pointerup') {
+          if (canDiscardNow() && overPile(e, pile)) {
+            confirmDiscard(id); // apply() re-renders on success
+            acted = true;
+          } else {
+            // Reorder — only when released near the hand row, so an aborted
+            // drag (let go somewhere random) doesn't scramble the hand.
+            const rr = row.getBoundingClientRect();
+            if (e.clientY > rr.top - 80 && e.clientY < rr.bottom + 80) {
+              handOrder = moveCard(handOrder, id, insertIndexAt(row, e.clientX));
+              acted = true;
+            }
           }
+        }
+        if (pendingRender || acted) {
+          pendingRender = false;
+          render();
         }
       };
 
@@ -720,14 +807,21 @@ export function startTable(container, opts) {
   function buildMyHand() {
     const hand = state.hands[mySeat];
     if (sel != null && hand.indexOf(sel) === -1) sel = null;
-    const arr = arrangeHand(hand, state.wildRank, state.config.mode);
-    const ordered = [];
-    const groupOf = new Map(); // card id -> meld index, or -1 for deadwood
-    arr.melds.forEach((m, i) => m.forEach((c) => { ordered.push(c); groupOf.set(c, i); }));
-    arr.deadwood.forEach((c) => { ordered.push(c); groupOf.set(c, -1); });
 
-    const groups = arr.melds.length + (arr.deadwood.length ? 1 : 0);
-    const boundaries = Math.max(0, groups - 1);
+    // The player owns the card ORDER (drag to rearrange, anytime); the solver
+    // still identifies the melds, shown as per-meld underlines plus a small
+    // gap wherever adjacent cards belong to different melds (or deadwood).
+    handOrder = mergeOrder(handOrder, hand);
+    const ordered = handOrder;
+    const arr = arrangeHand(hand, state.wildRank, state.config.mode);
+    const groupOf = new Map(); // card id -> meld index, or -1 for deadwood
+    arr.melds.forEach((m, i) => m.forEach((c) => groupOf.set(c, i)));
+    arr.deadwood.forEach((c) => groupOf.set(c, -1));
+
+    let boundaries = 0;
+    for (let i = 1; i < ordered.length; i++) {
+      if (groupOf.get(ordered[i]) !== groupOf.get(ordered[i - 1])) boundaries++;
+    }
     const zoneW = Math.min(container.clientWidth || 390, 560) - 24;
     const interactive = canDiscardNow();
 
@@ -751,7 +845,7 @@ export function startTable(container, opts) {
       if (i > 0 && g !== groupOf.get(ordered[i - 1])) {
         cardEl.style.marginLeft = `calc(var(--hand-overlap, 8px) + ${GROUP_GAP}px)`;
       }
-      if (interactive) attachDrag(cardEl, id);
+      attachDrag(cardEl, id); // reorder works even when it's not your turn
     }
     return { row, points: arr.points };
   }
@@ -973,6 +1067,12 @@ export function startTable(container, opts) {
 
   function render() {
     if (disposed) return;
+    if (dragging) {
+      // Never rebuild the DOM out from under an in-flight drag (an AI or
+      // remote move can land mid-gesture); catch up when the card is dropped.
+      pendingRender = true;
+      return;
+    }
     const playing = state.phase === 'draw' || state.phase === 'discard';
     const root = el('div', 'tb-screen');
 
