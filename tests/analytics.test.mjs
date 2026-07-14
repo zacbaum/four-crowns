@@ -12,7 +12,7 @@ import {
   ROUND_ORDER, roundLabel, filterGames, playerAggregates, headToHead,
   averageScores, roundStats, trajectory, goingOutStats, caughtDistribution,
   singleRoundRecords, eloRatings, totalsOverTime, streaks,
-  meldStats, classifyMeld,
+  meldStats, classifyMeld, roundLengthStats,
 } from '../js/stats/analytics.js';
 
 const approx = (actual, expected, msg) => {
@@ -461,6 +461,39 @@ test('meldStats: aggregates per player over rounds with meld data', () => {
   assert.equal(nobody.avgWildsPerRound, null);
   assert.equal(nobody.wildMeldShare, null);
   assert.deepEqual(meldStats([], 'Zac').melds, 0);
+});
+
+test('roundLengthStats: distribution of turns to go out', () => {
+  const gl = mkGame({
+    id: 'l1', kind: 'ai',
+    rounds: [
+      { round: 3, scores: [0, 7], wentOut: 0, turns: 2 },
+      { round: 4, scores: [5, 0], wentOut: 1, turns: 6 },
+      { round: 6, scores: [0, 12], wentOut: 0, turns: 6 },
+      { round: 7, scores: [3, 0], wentOut: 1, turns: 25 }, // overflow bin
+      { round: 8, scores: [1, 0], wentOut: 1 },            // no turns recorded
+    ],
+    totals: [9, 19], winner: 0,
+  });
+  const rl = roundLengthStats([...GAMES, gl]); // legacy fixture has no turns
+  assert.equal(rl.rounds, 4);
+  approx(rl.avgTurns, (2 + 6 + 6 + 25) / 4);
+  assert.equal(rl.minTurns, 2);
+  assert.equal(rl.maxTurns, 25);
+  assert.equal(rl.histogram.length, 20); // 1..19 + '20+'
+  assert.equal(rl.histogram[1].count, 1);  // turns=2
+  assert.equal(rl.histogram[5].count, 2);  // turns=6 twice
+  assert.equal(rl.histogram[19].label, '20+');
+  assert.equal(rl.histogram[19].count, 1); // turns=25
+  // no data at all
+  const empty = roundLengthStats(GAMES);
+  assert.equal(empty.rounds, 0);
+  assert.equal(empty.avgTurns, null);
+  assert.deepEqual(empty.histogram, []);
+  // no overflow bin when everything fits
+  const small = roundLengthStats([mkGame({ rounds: [{ round: 3, scores: [0, 5], wentOut: 0, turns: 4 }] })]);
+  assert.equal(small.histogram.length, 4);
+  assert.equal(small.histogram[3].label, '4');
 });
 
 test('metrics compose with filterGames (charts always agree with the filter row)', () => {

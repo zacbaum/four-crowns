@@ -50,6 +50,7 @@ function deal(state) {
   state.wentOut = null;
   state.lastTurnFor = null;
   state.turnsThisRound = 0;
+  state.wentOutOnTurn = null;
 }
 
 /**
@@ -72,6 +73,7 @@ export function createGame(config) {
     wentOut: null,
     lastTurnFor: null,
     turnsThisRound: 0,
+    wentOutOnTurn: null,
     roundResults: [],
     totals: [0, 0],
     rngState: config.seed | 0,
@@ -118,6 +120,10 @@ function doDiscard(state, action) {
   if (state.wentOut === null && canGoOut(hand, state.wildRank)) {
     state.wentOut = player;
     state.lastTurnFor = 1 - player;
+    // The going-out player's own turn number: discards alternate starting
+    // with the non-dealer, so their count is ceil(total/2) whichever seat
+    // they sit in (odd totals belong to the first mover, even to the second).
+    state.wentOutOnTurn = Math.ceil(state.turnsThisRound / 2);
   }
   if (state.wentOut !== null && player === state.lastTurnFor) {
     endRound(state);
@@ -138,6 +144,9 @@ function endRound(state) {
     wildRank: state.wildRank,
     scores,
     wentOut: state.wentOut,
+    // Turns the going-out player needed (cap-ended rounds: each player's
+    // approximate turn count — wentOut is null there so it's distinguishable).
+    turns: state.wentOutOnTurn ?? Math.ceil(state.turnsThisRound / 2),
     arrangements,
   });
   state.totals[0] += scores[0];

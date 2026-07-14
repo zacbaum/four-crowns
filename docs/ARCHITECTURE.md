@@ -243,11 +243,12 @@ localStorage key `fourcrowns.v1`:
     hardMode: bool,
     players: [string, string],     // names; index 0 = local/first player
     rounds: [ { round: 3|4|6|...|13, scores: [a, b], wentOut: 0|1|null,
-                melds?: [meldsP0, meldsP1] } ],
-                // melds (digital games only): each player's final meld
-                // arrangement, an array of melds of 3-4 card ids (0-51).
-                // The round's wild rank = round. Absent for scorekeeper /
-                // pre-update records; soft-validated on load.
+                turns?: number, melds?: [meldsP0, meldsP1] } ],
+                // turns (digital games only): how many draw-discard turns the
+                // going-out player needed. melds (digital games only): each
+                // player's final meld arrangement, an array of melds of 3-4
+                // card ids (0-51). The round's wild rank = round. Both absent
+                // for scorekeeper / pre-update records; soft-validated on load.
     totals: [a, b],
     winner: 0|1|'tie'|null,        // null = unfinished/abandoned
     finished: bool,

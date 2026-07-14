@@ -116,6 +116,8 @@ export function buildGameRecord(state, adapters, id, finished) {
       round: r.round,
       scores: [r.scores[0], r.scores[1]],
       wentOut: r.wentOut,
+      // Turns the going-out player needed — feeds the round-length analytics.
+      ...(Number.isInteger(r.turns) ? { turns: r.turns } : {}),
       // Final meld arrangement per player (arrays of card ids 0-51) — feeds
       // the meld-trends analytics. The wild rank is recoverable from `round`.
       ...(r.arrangements

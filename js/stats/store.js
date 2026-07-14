@@ -69,10 +69,13 @@ function normalizeGame(g) {
     if (!Array.isArray(r.scores) || r.scores.length !== 2
       || !r.scores.every(Number.isFinite)) return null;
     const melds = normalizeMelds(r.melds);
+    // turns: soft field — how many turns the going-out player needed.
+    const turns = (Number.isInteger(r.turns) && r.turns >= 1) ? r.turns : null;
     rounds.push({
       round: r.round,
       scores: [r.scores[0], r.scores[1]],
       wentOut: (r.wentOut === 0 || r.wentOut === 1) ? r.wentOut : null,
+      ...(turns !== null ? { turns } : {}),
       ...(melds ? { melds } : {}),
     });
   }

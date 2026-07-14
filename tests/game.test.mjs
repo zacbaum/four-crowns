@@ -242,6 +242,8 @@ function playFullGame(seed, mode, policySeed) {
   let actions = 0;
   let finalCountdown = null; // tracks the opponent's exactly-one final turn
   const expectedTotals = [0, 0];
+  let discards = [0, 0];      // independent per-player discard count this round
+  let expectedTurns = null;   // goer-out's own discard count at go-out moment
   checkRoundStart(state);
   while (state.phase !== 'gameOver') {
     assert.ok(actions < 30000, `game must terminate (seed ${seed}, mode ${mode})`);
@@ -256,6 +258,10 @@ function playFullGame(seed, mode, policySeed) {
     const phaseBefore = state.phase;
     applyAction(state, action);
     actions++;
+    if (action.type === 'discard') discards[action.player]++;
+    if (wentOutBefore === null && state.wentOut !== null) {
+      expectedTurns = discards[state.wentOut];
+    }
 
     if (state.phase === 'draw' || state.phase === 'discard') {
       assertFullDeck(state, `(action ${actions})`);
@@ -280,12 +286,16 @@ function playFullGame(seed, mode, policySeed) {
       finalCountdown = null;
       verifyRoundEnd(state);
       const res = state.roundResults[state.roundResults.length - 1];
+      assert.equal(res.turns, expectedTurns,
+        "roundResults.turns is the goer-out's own discard count at going out");
       expectedTotals[0] += res.scores[0];
       expectedTotals[1] += res.scores[1];
       assert.deepEqual(state.totals, expectedTotals, 'totals accumulate round scores');
     }
     if (phaseBefore === 'roundEnd' && state.phase !== 'gameOver') {
       checkRoundStart(state);
+      discards = [0, 0];
+      expectedTurns = null;
     }
   }
   // Game over bookkeeping.

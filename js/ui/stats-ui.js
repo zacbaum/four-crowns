@@ -21,7 +21,7 @@ import {
 import {
   filterGames, playerAggregates, headToHead, averageScores, roundStats,
   trajectory, goingOutStats, caughtDistribution, singleRoundRecords,
-  eloRatings, totalsOverTime, streaks, meldStats,
+  eloRatings, totalsOverTime, streaks, meldStats, roundLengthStats,
 } from '../stats/analytics.js';
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
@@ -1000,6 +1000,38 @@ function meldTrendsCard(games, youName) {
   return card;
 }
 
+function roundLengthCard(games) {
+  const rl = roundLengthStats(games);
+  const card = chartCard('Round length', 'How many turns before someone went out');
+  if (rl.rounds === 0) {
+    card.appendChild(h('p', 'st-note',
+      'Round lengths are recorded for games played in the app (vs AI or online) — play a digital game to see how fast your rounds end.'));
+    return card;
+  }
+  const grid = h('div', 'st-extremes st-records');
+  const box = (label, value, sub) => {
+    const b = h('div', 'st-extreme');
+    b.appendChild(h('div', 'st-extreme-label', label));
+    b.appendChild(h('div', 'st-extreme-value', value));
+    if (sub) b.appendChild(h('div', 'st-extreme-sub', sub));
+    return b;
+  };
+  grid.appendChild(box('Average', `${fmtNum(rl.avgTurns, 1)} turns`, `over ${rl.rounds} rounds`));
+  grid.appendChild(box('Fastest out', `${rl.minTurns} turn${rl.minTurns === 1 ? '' : 's'}`));
+  grid.appendChild(box('Longest', `${rl.maxTurns} turns`));
+  card.appendChild(grid);
+  renderBars(card, {
+    groups: rl.histogram.map((b) => ({ label: b.label, values: [b.count] })),
+    seriesNames: ['Rounds'],
+    colors: [SERIES[0]],
+    valueFmt: (v) => (v == null ? '—' : String(v)),
+    tipTitle: (gi) => `Out in ${rl.histogram[gi].label} turn${rl.histogram[gi].label === '1' ? '' : 's'}`,
+    ariaLabel: `Histogram of turns to go out, ${rl.rounds} rounds`,
+    labelMax: true,
+  });
+  return card;
+}
+
 function eloCard(games, youName, pair) {
   const { ratings, series } = eloRatings(games);
   if (ratings.length < 2) return null; // need at least one decided/tied game
@@ -1295,6 +1327,7 @@ function render() {
   root.appendChild(distributionCard(games, youName));
   root.appendChild(goingOutCard(games, pair));
   root.appendChild(meldTrendsCard(games, youName));
+  root.appendChild(roundLengthCard(games));
   const elo = eloCard(games, youName, pair);
   if (elo) root.appendChild(elo);
   root.appendChild(gamesListCard(games, youName));
