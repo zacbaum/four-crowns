@@ -36,6 +36,7 @@ const view = {
   hardOnly: false,   // hard-mode chip
   trajIndex: 0,      // 0 = most recent game (trajectory chart selector)
   expandedId: null,  // expanded row in the recent-games list
+  showAllGames: false, // recent-games list starts collapsed to the last 3
 };
 let root = null;
 
@@ -167,6 +168,7 @@ const CSS = `
 .st-btn { border: 1px solid var(--grid, #e1e0d9); border-radius: 8px;
   background: var(--surface-1, #fcfcfb); color: var(--ink-1, #0b0b0b);
   font: inherit; font-size: 13px; padding: 8px 14px; cursor: pointer; }
+.st-btn-wide { display: block; width: 100%; margin-top: 8px; text-align: center; }
 .st-btn-primary { background: var(--accent, #2a78d6);
   border-color: var(--accent, #2a78d6); color: #fff; }
 .st-btn-danger { color: var(--critical, #d03b3b);
@@ -239,6 +241,22 @@ function yTicks(rawMax, intervals = 4) {
   const top = step * Math.ceil((rawMax || 1) / step);
   const out = [];
   for (let v = 0; v <= top + 1e-9; v += step) out.push(Math.round(v * 100) / 100);
+  return out;
+}
+
+/**
+ * Ticks fitted to [dataMin, dataMax] with ~10% padding and a clean step —
+ * for series that live far from zero (e.g. Elo around 1500), where a 0-based
+ * axis would flatten the line into noise.
+ */
+function fittedTicks(dataMin, dataMax, intervals = 4) {
+  const span = Math.max(dataMax - dataMin, 1);
+  const pad = span * 0.1;
+  const step = niceStep((span + 2 * pad) / intervals);
+  const lo = step * Math.floor((dataMin - pad) / step);
+  const hi = step * Math.ceil((dataMax + pad) / step);
+  const out = [];
+  for (let v = lo; v <= hi + 1e-9; v += step) out.push(Math.round(v * 100) / 100);
   return out;
 }
 
@@ -350,21 +368,26 @@ function gridAndAxis(svg, m, plotW, ticks, y, fmt) {
 /**
  * Multi-series line chart with crosshair tooltip + keyboard support.
  * series: [{name, color, values: (number|null)[]}] aligned to xLabels.
+ * fitDomain: fit the y-axis to the data (padded) instead of starting at 0 —
+ * for series far from zero, like Elo ratings.
  */
-function renderLineChart(card, { series, xLabels, tipTitle, ariaLabel }) {
+function renderLineChart(card, { series, xLabels, tipTitle, ariaLabel, fitDomain = false }) {
   if (series.length >= 2) card.appendChild(legendRow(series, 'line'));
   const wrap = h('div', 'st-chartwrap');
   card.appendChild(wrap);
 
   const n = xLabels.length;
   const H = 200;
-  const m = { t: 12, r: 54, b: 22, l: 32 };
+  const m = { t: 12, r: 54, b: 22, l: fitDomain ? 40 : 32 };
   const plotW = VBW - m.l - m.r;
   const plotH = H - m.t - m.b;
   const all = series.flatMap((s) => s.values).filter((v) => v != null);
-  const ticks = yTicks(Math.max(...all, 0));
+  const ticks = fitDomain && all.length
+    ? fittedTicks(Math.min(...all), Math.max(...all))
+    : yTicks(Math.max(...all, 0));
+  const lo = ticks[0];
   const top = ticks[ticks.length - 1];
-  const y = (v) => m.t + plotH * (1 - v / top);
+  const y = (v) => m.t + plotH * (1 - (v - lo) / (top - lo || 1));
   const xs = Array.from({ length: n }, (_, i) => (n === 1
     ? m.l + plotW / 2 : m.l + (plotW * i) / (n - 1)));
 
@@ -914,8 +937,12 @@ function recordsCard(games, youName) {
   const wh = rec.worstHand;
   grid.appendChild(box('Worst hand', wh ? `${wh.score} pts` : '—',
     wh ? `round of ${wh.label}s · vs ${truncate(wh.opponent, 10)}` : undefined));
+  // cleanRounds ⊇ timesWentOut: a caught player who fully melds also scores 0,
+  // and imported rounds where both scored 0 have no went-out marker. Showing
+  // both keeps this tile consistent with the histogram's "0" bar.
+  const extraClean = rec.cleanRounds - rec.timesWentOut;
   grid.appendChild(box('Times gone out', String(rec.timesWentOut),
-    'rounds you melded out'));
+    extraClean > 0 ? `+${extraClean} more rounds scored 0` : 'rounds you melded out first'));
   const bh = rec.biggestHit;
   grid.appendChild(box('Biggest hit', bh ? `${bh.score} pts` : '—',
     bh ? `${truncate(bh.opponent, 10)}, round of ${bh.label}s` : undefined));
@@ -972,6 +999,7 @@ function eloCard(games, youName, pair) {
         xLabels: finished.map((g) => fmtDate(g.dateISO)),
         tipTitle: (i) => fmtDate(finished[i].dateISO),
         ariaLabel: `Elo rating over time for ${chartSeries.map((s) => s.name).join(' and ')}`,
+        fitDomain: true, // Elo lives ~1400-1600; a 0-based axis flattens it
       });
       card.appendChild(chartWrap);
     }
@@ -1046,8 +1074,12 @@ function gamesListCard(games, youName) {
   const card = h('section', 'st-card');
   card.appendChild(h('h3', null, 'Recent games'));
   const sorted = games.slice().sort((a, b) => b.dateISO.localeCompare(a.dateISO));
-  const MAX = 30;
-  for (const game of sorted.slice(0, MAX)) {
+  // Collapsed by default: the last 3 games, with a one-tap expand. Expanded
+  // view is still bounded (mobile DOM) at MAX with a note beyond that.
+  const COLLAPSED = 3;
+  const MAX = 100;
+  const shown = view.showAllGames ? MAX : COLLAPSED;
+  for (const game of sorted.slice(0, shown)) {
     const row = h('div', 'st-game');
     const head = h('button', 'st-game-head');
     head.type = 'button';
@@ -1075,8 +1107,27 @@ function gamesListCard(games, youName) {
     if (view.expandedId === game.id) row.appendChild(gameDetail(game));
     card.appendChild(row);
   }
-  if (sorted.length > MAX) {
-    card.appendChild(h('p', 'st-note', `Showing the latest ${MAX} of ${sorted.length} games.`));
+  if (!view.showAllGames && sorted.length > COLLAPSED) {
+    const more = h('button', 'st-btn st-btn-wide', `Show all ${sorted.length} games`);
+    more.type = 'button';
+    more.addEventListener('click', () => {
+      view.showAllGames = true;
+      render();
+    });
+    card.appendChild(more);
+  } else if (view.showAllGames) {
+    if (sorted.length > MAX) {
+      card.appendChild(h('p', 'st-note', `Showing the latest ${MAX} of ${sorted.length} games.`));
+    }
+    if (sorted.length > COLLAPSED) {
+      const less = h('button', 'st-btn st-btn-wide', 'Show fewer');
+      less.type = 'button';
+      less.addEventListener('click', () => {
+        view.showAllGames = false;
+        render();
+      });
+      card.appendChild(less);
+    }
   }
   return card;
 }
@@ -1186,8 +1237,6 @@ function render() {
   const pair = namePair(games, youName);
 
   root.appendChild(overviewTiles(games, youName));
-  const elo = eloCard(games, youName, pair);
-  if (elo) root.appendChild(elo);
   const records = recordsCard(games, youName);
   if (records) root.appendChild(records);
   root.appendChild(trajectoryCard(games));
@@ -1195,6 +1244,8 @@ function render() {
   root.appendChild(totalsOverTimeCard(games, pair));
   root.appendChild(distributionCard(games, youName));
   root.appendChild(goingOutCard(games, pair));
+  const elo = eloCard(games, youName, pair);
+  if (elo) root.appendChild(elo);
   root.appendChild(gamesListCard(games, youName));
   root.appendChild(backupCard());
 }
@@ -1203,6 +1254,7 @@ registerScreen('stats', {
   mount(container) {
     injectStyles();
     view.expandedId = null;
+    view.showAllGames = false;
     container.textContent = '';
     root = h('div', 'st-root');
     container.appendChild(root);

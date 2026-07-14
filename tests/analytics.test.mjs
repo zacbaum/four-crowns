@@ -313,6 +313,14 @@ test('caughtDistribution: per-player filter + includeZero adds a "0" bar', () =>
 test('singleRoundRecords: worst hand, times gone out, biggest hit', () => {
   const zac = singleRoundRecords(GAMES, 'Zac');
   assert.equal(zac.timesWentOut, 7); // rounds where wentOut === Zac's seat
+  // cleanRounds counts score-0 rounds: Zac's 13 rounds have 7 zeros, but one
+  // of them (g3 r4, both 0, wentOut=0=Zac) IS a went-out — total zeros = 7.
+  assert.equal(zac.cleanRounds, 7);
+  // a round can be clean without going out: both-zero round credited to Zac
+  // in g3 means Bot's zero there is clean-but-not-out.
+  const bot = singleRoundRecords(GAMES, 'Bot');
+  assert.ok(bot.cleanRounds > bot.timesWentOut,
+    `Bot clean ${bot.cleanRounds} should exceed wentOut ${bot.timesWentOut}`);
   assert.equal(zac.worstHand.score, 25); // g2 round 4
   assert.equal(zac.worstHand.gameId, 'g2');
   assert.equal(zac.worstHand.round, 4);
@@ -323,6 +331,7 @@ test('singleRoundRecords: worst hand, times gone out, biggest hit', () => {
   // player not in any game -> empty records
   const nobody = singleRoundRecords(GAMES, 'Nobody');
   assert.equal(nobody.timesWentOut, 0);
+  assert.equal(nobody.cleanRounds, 0);
   assert.equal(nobody.worstHand, null);
   assert.equal(nobody.biggestHit, null);
   // Alice: only g6, never went out, opponent Bob always scored 0
