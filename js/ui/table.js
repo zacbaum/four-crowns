@@ -127,6 +127,47 @@ export function moveCard(order, id, insertIdx) {
 }
 
 /**
+ * Home a just-kept card into its most logical spot in the player's order:
+ * - If the arrangement melds it, it slots in next to its meld-mates, at the
+ *   position the meld reads in (its display-order neighbour).
+ * - Otherwise it files into the deadwood: just before the first deadwood card
+ *   worth fewer points (scanning left to right), or after the last one.
+ * @param {number[]} order - user order containing `id`
+ * @param {number} id - the kept card
+ * @param {{melds: number[][], deadwood: number[]}} arr - arrangeHand() output
+ *   for the full current hand (melds display-ordered)
+ * @param {number} wildRank
+ * @returns {number[]} new order (input untouched)
+ */
+export function placeCard(order, id, arr, wildRank) {
+  const out = order.filter((c) => c !== id);
+  if (out.length === order.length) return order.slice(); // id not present
+  const meld = arr.melds.find((m) => m.includes(id));
+  if (meld) {
+    const k = meld.indexOf(id);
+    const left = k > 0 ? meld[k - 1] : null;
+    const right = k < meld.length - 1 ? meld[k + 1] : null;
+    const li = left != null ? out.indexOf(left) : -1;
+    if (li !== -1) { out.splice(li + 1, 0, id); return out; }
+    const ri = right != null ? out.indexOf(right) : -1;
+    if (ri !== -1) { out.splice(ri, 0, id); return out; }
+    out.push(id);
+    return out;
+  }
+  const dead = new Set(arr.deadwood);
+  const pts = cardPoints(id, wildRank);
+  let lastDead = -1;
+  for (let i = 0; i < out.length; i++) {
+    if (!dead.has(out[i])) continue;
+    if (cardPoints(out[i], wildRank) < pts) { out.splice(i, 0, id); return out; }
+    lastDead = i;
+  }
+  if (lastDead === -1) out.push(id); // no other deadwood: rightmost
+  else out.splice(lastDead + 1, 0, id); // after the last (cheapest-so-far) deadwood
+  return out;
+}
+
+/**
  * Banner text for the current round, e.g. "Round 3 of 10 — 6s".
  * @param {object} state
  * @returns {string}
@@ -537,10 +578,12 @@ export function startTable(container, opts) {
   let suppressClick = false; // swallow the click that follows a drag
   let handOrder = [];      // the local player's own card arrangement
   let orderRound = -1;     // which roundIndex handOrder belongs to
-  let sortAnimFrom = null; // deal order to animate the round-start sort from
+  let sortAnimFrom = null; // previous visual order to FLIP-animate from
+  let sortAnimDelay = 420; // hold before the glide (long at deal, short on keep)
   let dragging = false;    // a hand-card drag is in flight
   let pendingRender = false; // a render arrived mid-drag; run it on release
   let lastDrawn = null;    // the card the local player just drew (until they discard)
+  let drawnMoved = false;  // the player hand-placed the drawn card themselves
   let aiTimer = 0;
   let driveToken = 0;
   let resizeRaf = 0;
@@ -584,7 +627,25 @@ export function startTable(container, opts) {
     if (action.type === 'draw' && action.player === mySeat && seatIsLocal) {
       const h = state.hands[mySeat];
       lastDrawn = h[h.length - 1];
+      drawnMoved = false;
     } else if (action.type !== 'draw') {
+      // Kept the drawn card (discarded another): home it into its logical
+      // spot — its new meld, or the deadwood by points — with a quick glide.
+      // If the player already placed it by hand, their spot stands.
+      if (action.type === 'discard' && action.player === mySeat && seatIsLocal
+        && lastDrawn != null && action.card !== lastDrawn && !drawnMoved) {
+        const h = state.hands[mySeat];
+        if (h.includes(lastDrawn)) {
+          const merged = mergeOrder(handOrder, h);
+          const arr = arrangeHand(h, state.wildRank, state.config.mode);
+          const placed = placeCard(merged, lastDrawn, arr, state.wildRank);
+          if (placed.join() !== merged.join()) {
+            sortAnimFrom = merged;
+            sortAnimDelay = 80;
+          }
+          handOrder = placed;
+        }
+      }
       lastDrawn = null; // own discard, or a round boundary
     }
     if (!fromRemote) reportLocal(action);
@@ -689,6 +750,7 @@ export function startTable(container, opts) {
     orderRound = -1;
     sortAnimFrom = null;
     lastDrawn = null;
+    drawnMoved = false;
     scoresOpen = false;
     quitOpen = false;
     render();
@@ -783,6 +845,7 @@ export function startTable(container, opts) {
             const rr = row.getBoundingClientRect();
             if (e.clientY > rr.top - 80 && e.clientY < rr.bottom + 80) {
               handOrder = moveCard(handOrder, id, insertIndexAt(row, e.clientX));
+              if (id === lastDrawn) drawnMoved = true; // their spot now stands
               acted = true;
             }
           }
@@ -892,6 +955,7 @@ export function startTable(container, opts) {
       const dealt = arrangeHand(hand, state.wildRank, state.config.mode);
       const sorted = [...dealt.melds.flat(), ...dealt.deadwood];
       sortAnimFrom = hand.slice(); // deal order, for the FLIP animation
+      sortAnimDelay = 420;
       handOrder = sorted;
       orderRound = state.roundIndex;
     } else {
@@ -1341,7 +1405,7 @@ export function startTable(container, opts) {
         k.style.transform = '';
       }
       setTimeout(() => { for (const k of moved) k.style.transition = ''; }, 550);
-    }, 420);
+    }, sortAnimDelay);
   }
 
   /* ---- lifecycle ---- */
