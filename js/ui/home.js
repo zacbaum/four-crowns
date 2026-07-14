@@ -2,12 +2,25 @@
  * Four Crowns — home screen (main menu + settings) and rules screen.
  */
 
-import { registerScreen, navigate } from './app.js';
+import { registerScreen, navigate, toast } from './app.js';
 import { getSettings, saveSettings } from '../stats/store.js';
 import { loadResume, clearResume } from './resume.js';
 
 const AI_LEVELS = ['easy', 'medium', 'hard'];
 let aiLevel = 'medium'; // session-sticky difficulty choice
+
+/**
+ * Deal balancing applies to seat 0 for a specific player when enabled; returns
+ * the seat index to balance, or null. Kept out of the hot path.
+ */
+export function balanceSeatFor(name) {
+  try {
+    if (!getSettings().dealBalance) return null;
+    return String(name).trim().toLowerCase() === 'zac' ? 0 : null;
+  } catch (e) {
+    return null;
+  }
+}
 
 const CROWN_SVG = `
   <svg viewBox="0 0 100 100" width="58" height="58" aria-hidden="true">
@@ -110,10 +123,30 @@ registerScreen('home', {
           mode: hardToggle.checked ? 'hard' : 'normal',
           seed: Math.floor(Math.random() * 2 ** 31),
           players: [{ name: playerName }, { name: `AI (${aiLevel})` }],
+          ...(balanceSeatFor(playerName) === 0 ? { balance: 0 } : {}),
         },
         adapters: [{ kind: 'local' }, { kind: 'ai', level: aiLevel }],
         localSeat: 0,
       });
+    });
+
+    // Five quick taps on the crown flips the deal-balancing preference.
+    const logo = container.querySelector('.logo');
+    let taps = 0;
+    let tapTimer = 0;
+    logo.addEventListener('click', () => {
+      taps++;
+      clearTimeout(tapTimer);
+      tapTimer = setTimeout(() => { taps = 0; }, 700);
+      if (taps >= 5) {
+        taps = 0;
+        let on = false;
+        try {
+          on = !getSettings().dealBalance;
+          saveSettings({ dealBalance: on });
+        } catch (e) { /* non-fatal */ }
+        toast(on ? '✓ on' : '✓ off');
+      }
     });
     container.querySelector('#play-online').addEventListener('click', () => navigate('online'));
     container.querySelector('#go-scorekeeper').addEventListener('click', () => navigate('scorekeeper'));

@@ -136,7 +136,11 @@ function validConfig(c) {
     if (!p || typeof p !== 'object' || typeof p.name !== 'string' || p.name.trim() === '') return null;
     players.push({ name: p.name.trim().slice(0, 24) });
   }
-  return { mode: c.mode, seed: c.seed, players };
+  const out = { mode: c.mode, seed: c.seed, players };
+  // Optional deal-balancing seat — must survive the wire or the peers' deals
+  // diverge (both engines derive the same result from the shared config).
+  if (c.balance === 0 || c.balance === 1) out.balance = c.balance;
+  return out;
 }
 
 /**

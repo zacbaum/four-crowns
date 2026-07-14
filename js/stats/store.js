@@ -17,7 +17,7 @@ const AI_LEVELS = ['easy', 'medium', 'hard'];
 const ROUND_NUMBERS = new Set([3, 4, 6, 7, 8, 9, 10, 11, 12, 13]);
 
 function freshDB() {
-  return { settings: { hardMode: false, playerName: 'You' }, games: [] };
+  return { settings: { hardMode: false, playerName: 'You', dealBalance: false }, games: [] };
 }
 
 /**
@@ -108,6 +108,7 @@ export function loadDB() {
   const db = freshDB();
   if (parsed.settings && typeof parsed.settings === 'object') {
     if (typeof parsed.settings.hardMode === 'boolean') db.settings.hardMode = parsed.settings.hardMode;
+    if (typeof parsed.settings.dealBalance === 'boolean') db.settings.dealBalance = parsed.settings.dealBalance;
     if (typeof parsed.settings.playerName === 'string' && parsed.settings.playerName !== '') {
       db.settings.playerName = parsed.settings.playerName;
     }
@@ -171,6 +172,7 @@ export function saveSettings(patch) {
   const db = loadDB();
   if (patch && typeof patch === 'object') {
     if (typeof patch.hardMode === 'boolean') db.settings.hardMode = patch.hardMode;
+    if (typeof patch.dealBalance === 'boolean') db.settings.dealBalance = patch.dealBalance;
     if (typeof patch.playerName === 'string' && patch.playerName.trim() !== '') {
       db.settings.playerName = patch.playerName.trim();
     }

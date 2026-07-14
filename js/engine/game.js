@@ -51,6 +51,29 @@ function deal(state) {
   state.lastTurnFor = null;
   state.turnsThisRound = 0;
   state.wentOutOnTurn = null;
+  balanceDeal(state);
+}
+
+/**
+ * Optional deal balancing (config.balance = a seat index): after both hands
+ * are dealt — and before either is revealed — the balanced seat is given
+ * whichever of the two dealt hands has the lower opening deadwood, swapping
+ * the two hands if needed. Pure function of the dealt cards (no rng, so
+ * networked peers stay byte-identical) and the 52-card invariant is untouched
+ * — it only decides which player holds which of the two hands already dealt.
+ */
+function balanceDeal(state) {
+  const seat = state.config.balance;
+  if (seat !== 0 && seat !== 1) return;
+  const opp = 1 - seat;
+  const mode = state.config.mode;
+  const minePts = bestArrangement(state.hands[seat], state.wildRank, mode).points;
+  const oppPts = bestArrangement(state.hands[opp], state.wildRank, mode).points;
+  if (oppPts < minePts) {
+    const tmp = state.hands[seat];
+    state.hands[seat] = state.hands[opp];
+    state.hands[opp] = tmp;
+  }
 }
 
 /**

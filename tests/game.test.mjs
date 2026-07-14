@@ -335,3 +335,30 @@ test('full playthrough is deterministic end to end', () => {
   assert.equal(JSON.stringify(a.state), JSON.stringify(b.state));
   assert.equal(a.actions, b.actions);
 });
+
+test('deal balancing (config.balance): balanced seat gets the better opening hand', () => {
+  const pts = (h, wr) => bestArrangement(h, wr, 'normal').points;
+  let strictlyBetter = 0;
+  const N = 300;
+  for (let seed = 0; seed < N; seed++) {
+    // Baseline deal (no balancing) vs the same deal balanced for seat 0.
+    const base = createGame(mkConfig({ seed: 6000 + seed }));
+    const bal = createGame(mkConfig({ seed: 6000 + seed, balance: 0 }));
+    assertFullDeck(bal, `(balanced deal, seed ${seed})`);
+    // Balanced seat always ends with <= the other seat's opening points...
+    assert.ok(pts(bal.hands[0], bal.wildRank) <= pts(bal.hands[1], bal.wildRank),
+      `seed ${seed}: balanced seat did not get the <= hand`);
+    // ...i.e. the min of the two dealt hands (only which player holds which
+    // changed — the multiset of both hands is unchanged vs baseline).
+    const baseMin = Math.min(pts(base.hands[0], base.wildRank), pts(base.hands[1], base.wildRank));
+    assert.equal(pts(bal.hands[0], bal.wildRank), baseMin, `seed ${seed}: not the better of the two`);
+    if (pts(base.hands[0], base.wildRank) > pts(base.hands[1], base.wildRank)) strictlyBetter++;
+  }
+  // On a good fraction of deals the baseline seat-0 hand was worse, so
+  // balancing actually changed something (sanity that it isn't a no-op).
+  assert.ok(strictlyBetter > N * 0.2, `balancing rarely helped (${strictlyBetter}/${N})`);
+  // Determinism preserved with balancing on.
+  const a = createGame(mkConfig({ seed: 999, balance: 0 }));
+  const b = createGame(mkConfig({ seed: 999, balance: 0 }));
+  assert.deepEqual(JSON.parse(JSON.stringify(a)), JSON.parse(JSON.stringify(b)));
+});

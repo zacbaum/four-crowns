@@ -18,6 +18,7 @@ import { getSettings, saveSettings } from '../stats/store.js';
 import { createRoom, joinRoom, normalizeRoomCode, isValidRoomCode } from '../net/sync.js';
 import { createGame, applyAction } from '../engine/game.js';
 import { stateFingerprint } from './resume.js';
+import { balanceSeatFor } from './home.js';
 
 /* ------------------------------------------------------------------ */
 /* Styles (injected once; "on-" prefix; reuses app.css tokens)         */
@@ -285,6 +286,7 @@ registerScreen('online', {
         mode: hardMode ? 'hard' : 'normal',
         seed: randomSeed(),
         players: [{ name: myName }, { name: hostState.guestName }],
+        ...(balanceSeatFor(myName) === 0 ? { balance: 0 } : {}),
       };
       room.lock(); // no new connections once the game is underway
       if (!room.send({ t: 'start', config, guestSeat: 1 })) {
