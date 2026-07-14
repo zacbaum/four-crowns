@@ -20,8 +20,8 @@ import {
 } from '../stats/store.js';
 import {
   filterGames, playerAggregates, headToHead, averageScores, roundStats,
-  trajectory, goingOutStats, caughtDistribution, bestWorstRounds,
-  totalsOverTime, streaks,
+  trajectory, goingOutStats, caughtDistribution, singleRoundRecords,
+  eloRatings, totalsOverTime, streaks,
 } from '../stats/analytics.js';
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
@@ -122,6 +122,20 @@ const CSS = `
   color: var(--ink-1, #0b0b0b); }
 .st-extreme-sub { font-size: 12px; color: var(--ink-2, #52514e);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.st-records { grid-template-columns: repeat(3, 1fr); }
+.st-elo { border-collapse: collapse; width: 100%; margin-top: 4px;
+  font-size: 14px; font-variant-numeric: tabular-nums; }
+.st-elo th, .st-elo td { text-align: right; padding: 6px 8px;
+  border-bottom: 1px solid var(--grid, #e1e0d9); }
+.st-elo th { font-size: 12px; font-weight: 500; color: var(--ink-muted, #898781); }
+.st-elo td { color: var(--ink-2, #52514e); }
+.st-elo th:nth-child(2), .st-elo td.st-elo-name { text-align: left;
+  color: var(--ink-1, #0b0b0b); overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; max-width: 42vw; }
+.st-elo-you td { font-weight: 700; color: var(--ink-1, #0b0b0b); }
+.st-elo-you td.st-elo-name::after { content: ' (you)';
+  color: var(--ink-muted, #898781); font-weight: 400; font-size: 12px; }
+.st-elo-chart { margin-top: 10px; }
 .st-game { border-top: 1px solid var(--grid, #e1e0d9); }
 .st-game:first-of-type { border-top: 0; }
 .st-game-head { display: block; width: 100%; border: 0; background: none;
@@ -851,10 +865,10 @@ function totalsOverTimeCard(games, pair) {
 }
 
 function distributionCard(games, youName) {
-  const card = chartCard('Caught points per round', `How much ${youName}'s caught hands cost (nonzero rounds)`);
-  const dist = caughtDistribution(games, 5, youName);
+  const card = chartCard('Points per round', `${youName}'s per-round scores — the "0" bar is clean/went-out rounds`);
+  const dist = caughtDistribution(games, 5, youName, true);
   if (dist.total === 0) {
-    card.appendChild(h('p', 'st-note', `No caught rounds for ${youName} in these games.`));
+    card.appendChild(h('p', 'st-note', `No rounds recorded for ${youName} in these games.`));
     return card;
   }
   renderBars(card, {
@@ -863,7 +877,7 @@ function distributionCard(games, youName) {
     colors: [SERIES[0]],
     valueFmt: (v) => (v == null ? '—' : String(v)),
     tipTitle: (gi) => `${dist.buckets[gi].label} points`,
-    ariaLabel: `Histogram of ${youName}'s caught points per round, ${dist.total} rounds`,
+    ariaLabel: `Histogram of ${youName}'s per-round scores, ${dist.total} rounds`,
     labelMax: true,
   });
   return card;
@@ -885,22 +899,83 @@ function goingOutCard(games, pair) {
   return card;
 }
 
-function extremesCard(games, youName) {
-  const bw = bestWorstRounds(games);
-  const you = bw.find((e) => e.name === youName) || bw[0];
-  if (!you) return null;
-  const card = chartCard('Single-round extremes', `Best and worst round — ${you.name}`);
-  const grid = h('div', 'st-extremes');
-  const mk = (label, e) => {
-    const box = h('div', 'st-extreme');
-    box.appendChild(h('div', 'st-extreme-label', label));
-    box.appendChild(h('div', 'st-extreme-value', `${e.score} pts`));
-    box.appendChild(h('div', 'st-extreme-sub', `round of ${e.label}s · ${fmtDate(e.dateISO)}`));
-    return box;
+function recordsCard(games, youName) {
+  const rec = singleRoundRecords(games, youName);
+  if (!rec.worstHand && rec.timesWentOut === 0) return null; // youName not in these games
+  const card = chartCard('Your records', `Single-round highs for ${youName}`);
+  const grid = h('div', 'st-extremes st-records');
+  const box = (label, value, sub) => {
+    const b = h('div', 'st-extreme');
+    b.appendChild(h('div', 'st-extreme-label', label));
+    b.appendChild(h('div', 'st-extreme-value', value));
+    if (sub) b.appendChild(h('div', 'st-extreme-sub', sub));
+    return b;
   };
-  grid.appendChild(mk('Best round', you.best));
-  grid.appendChild(mk('Worst round', you.worst));
+  const wh = rec.worstHand;
+  grid.appendChild(box('Worst hand', wh ? `${wh.score} pts` : '—',
+    wh ? `round of ${wh.label}s · vs ${truncate(wh.opponent, 10)}` : undefined));
+  grid.appendChild(box('Times gone out', String(rec.timesWentOut),
+    'rounds you melded out'));
+  const bh = rec.biggestHit;
+  grid.appendChild(box('Biggest hit', bh ? `${bh.score} pts` : '—',
+    bh ? `${truncate(bh.opponent, 10)}, round of ${bh.label}s` : undefined));
   card.appendChild(grid);
+  return card;
+}
+
+function eloCard(games, youName, pair) {
+  const { ratings, series } = eloRatings(games);
+  if (ratings.length < 2) return null; // need at least one decided/tied game
+  const card = chartCard('Elo ratings', 'Skill rating from finished games (starts at 1500)');
+
+  const table = h('table', 'st-elo');
+  const thead = h('thead');
+  const hr = h('tr');
+  for (const head of ['#', 'Player', 'Elo', 'W–L–T']) hr.appendChild(h('th', null, head));
+  thead.appendChild(hr);
+  table.appendChild(thead);
+  const tbody = h('tbody');
+  ratings.forEach((r, i) => {
+    const tr = h('tr');
+    if (r.name === youName) tr.className = 'st-elo-you';
+    tr.appendChild(h('td', null, String(i + 1)));
+    tr.appendChild(h('td', 'st-elo-name', r.name));
+    tr.appendChild(h('td', null, String(r.rating)));
+    tr.appendChild(h('td', null, `${r.wins}–${r.losses}–${r.ties}`));
+    tbody.appendChild(tr);
+  });
+  table.appendChild(tbody);
+  card.appendChild(table);
+
+  // Rating-progression chart for the named player + main opponent.
+  const finished = games.filter((g) => g.finished
+    && (g.winner === 0 || g.winner === 1 || g.winner === 'tie'))
+    .slice()
+    .sort((a, b) => a.dateISO.localeCompare(b.dateISO) || String(a.id).localeCompare(String(b.id)));
+  if (finished.length >= 2 && pair.length) {
+    const idxById = new Map(finished.map((g, i) => [g.id, i]));
+    const chartSeries = pair
+      .map((name) => series.find((s) => s.name === name))
+      .filter(Boolean)
+      .map((s) => {
+        const values = new Array(finished.length).fill(null);
+        for (const p of s.points) {
+          if (p.gameId != null && idxById.has(p.gameId)) values[idxById.get(p.gameId)] = p.rating;
+        }
+        return { name: s.name, color: SERIES[pair.indexOf(s.name)] || SERIES[0], values };
+      })
+      .filter((s) => s.values.some((v) => v != null));
+    if (chartSeries.length) {
+      const chartWrap = h('div', 'st-elo-chart');
+      renderLineChart(chartWrap, {
+        series: chartSeries,
+        xLabels: finished.map((g) => fmtDate(g.dateISO)),
+        tipTitle: (i) => fmtDate(finished[i].dateISO),
+        ariaLabel: `Elo rating over time for ${chartSeries.map((s) => s.name).join(' and ')}`,
+      });
+      card.appendChild(chartWrap);
+    }
+  }
   return card;
 }
 
@@ -1111,13 +1186,15 @@ function render() {
   const pair = namePair(games, youName);
 
   root.appendChild(overviewTiles(games, youName));
+  const elo = eloCard(games, youName, pair);
+  if (elo) root.appendChild(elo);
+  const records = recordsCard(games, youName);
+  if (records) root.appendChild(records);
   root.appendChild(trajectoryCard(games));
   root.appendChild(roundAveragesCard(games, pair));
   root.appendChild(totalsOverTimeCard(games, pair));
   root.appendChild(distributionCard(games, youName));
   root.appendChild(goingOutCard(games, pair));
-  const extremes = extremesCard(games, youName);
-  if (extremes) root.appendChild(extremes);
   root.appendChild(gamesListCard(games, youName));
   root.appendChild(backupCard());
 }

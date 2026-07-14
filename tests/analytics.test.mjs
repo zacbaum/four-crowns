@@ -11,7 +11,7 @@ import assert from 'node:assert/strict';
 import {
   ROUND_ORDER, roundLabel, filterGames, playerAggregates, headToHead,
   averageScores, roundStats, trajectory, goingOutStats, caughtDistribution,
-  bestWorstRounds, totalsOverTime, streaks,
+  singleRoundRecords, eloRatings, totalsOverTime, streaks,
 } from '../js/stats/analytics.js';
 
 const approx = (actual, expected, msg) => {
@@ -295,22 +295,83 @@ test('caughtDistribution: nonzero scores bucketed', () => {
   assert.equal(zeros.total, 0);
 });
 
-test('bestWorstRounds: min/max single rounds per player', () => {
-  const bw = bestWorstRounds(GAMES);
-  const zac = bw.find((p) => p.name === 'Zac');
-  assert.equal(zac.best.score, 0);
-  assert.equal(zac.worst.score, 25);
-  assert.equal(zac.worst.gameId, 'g2');
-  assert.equal(zac.worst.round, 4);
-  const bot = bw.find((p) => p.name === 'Bot');
-  assert.equal(bot.best.score, 0);
-  assert.equal(bot.worst.score, 12);
-  assert.equal(bot.worst.gameId, 'g1');
-  assert.equal(bot.worst.round, 6);
-  const alice = bw.find((p) => p.name === 'Alice');
-  assert.equal(alice.best.score, 15);
-  assert.equal(alice.worst.score, 20);
-  assert.deepEqual(bestWorstRounds([]), []);
+test('caughtDistribution: per-player filter + includeZero adds a "0" bar', () => {
+  // Zac's rounds across the fixture: 13 total, 6 nonzero (5,10,25,6,3,8), 7 zeros.
+  const nz = caughtDistribution(GAMES, 5, 'Zac');
+  assert.equal(nz.total, 6);
+  assert.deepEqual(nz.buckets.map((b) => b.count), [2, 3, 0, 0, 1]); // 1-5:{5,3} 6-10:{10,6,8} 21-25:{25}
+  const withZero = caughtDistribution(GAMES, 5, 'Zac', true);
+  assert.equal(withZero.total, 13);
+  assert.equal(withZero.buckets[0].label, '0');
+  assert.deepEqual(withZero.buckets.map((b) => b.count), [7, 2, 3, 0, 0, 1]);
+  // includeZero with only zero rounds still shows the 0 bar
+  const onlyZero = caughtDistribution([mkGame({ rounds: [{ round: 3, scores: [0, 0], wentOut: 0 }] })], 5, null, true);
+  assert.equal(onlyZero.total, 2);
+  assert.deepEqual(onlyZero.buckets.map((b) => [b.label, b.count]), [['0', 2]]);
+});
+
+test('singleRoundRecords: worst hand, times gone out, biggest hit', () => {
+  const zac = singleRoundRecords(GAMES, 'Zac');
+  assert.equal(zac.timesWentOut, 7); // rounds where wentOut === Zac's seat
+  assert.equal(zac.worstHand.score, 25); // g2 round 4
+  assert.equal(zac.worstHand.gameId, 'g2');
+  assert.equal(zac.worstHand.round, 4);
+  assert.equal(zac.worstHand.opponent, 'Bot');
+  assert.equal(zac.biggestHit.score, 25); // opponent Maya caught for 25 in g7
+  assert.equal(zac.biggestHit.gameId, 'g7');
+  assert.equal(zac.biggestHit.opponent, 'Maya');
+  // player not in any game -> empty records
+  const nobody = singleRoundRecords(GAMES, 'Nobody');
+  assert.equal(nobody.timesWentOut, 0);
+  assert.equal(nobody.worstHand, null);
+  assert.equal(nobody.biggestHit, null);
+  // Alice: only g6, never went out, opponent Bob always scored 0
+  const alice = singleRoundRecords(GAMES, 'Alice');
+  assert.equal(alice.timesWentOut, 0);
+  assert.equal(alice.worstHand.score, 20);
+  assert.equal(alice.biggestHit.score, 0);
+});
+
+test('eloRatings: exact one-game update, zero-sum, records, ordering', () => {
+  // Zac beats Bot from 1500/1500, k=32 -> +/-16.
+  const one = eloRatings([g1]);
+  const zac1 = one.ratings.find((r) => r.name === 'Zac');
+  const bot1 = one.ratings.find((r) => r.name === 'Bot');
+  assert.equal(zac1.rating, 1516);
+  assert.equal(bot1.rating, 1484);
+  assert.deepEqual([zac1.wins, zac1.losses, zac1.ties], [1, 0, 0]);
+  // k override
+  assert.equal(eloRatings([g1], { k: 24 }).ratings.find((r) => r.name === 'Zac').rating, 1512);
+  // a tie leaves equal starters unchanged
+  const tie = eloRatings([g3]);
+  assert.ok(tie.ratings.every((r) => r.rating === 1500));
+
+  // full fixture: finished decided/tied games only (g5 excluded)
+  const elo = eloRatings(GAMES);
+  assert.deepEqual(elo.ratings.map((r) => r.name).sort(), ['Alice', 'Bob', 'Bot', 'Maya', 'Zac']);
+  const by = Object.fromEntries(elo.ratings.map((r) => [r.name, r]));
+  assert.deepEqual([by.Zac.wins, by.Zac.losses, by.Zac.ties], [4, 1, 1]);
+  assert.deepEqual([by.Bot.wins, by.Bot.losses, by.Bot.ties], [1, 2, 1]);
+  assert.deepEqual([by.Maya.games, by.Maya.losses], [2, 2]); // g5 unfinished not counted
+  assert.deepEqual([by.Bob.wins, by.Alice.losses], [1, 1]);
+  // net winners rise above base, net losers fall below
+  assert.ok(by.Zac.rating > 1500 && by.Bob.rating > 1500);
+  assert.ok(by.Maya.rating < 1500 && by.Alice.rating < 1500);
+  // Elo is zero-sum: total rating conserved (within per-player rounding)
+  const sum = elo.ratings.reduce((a, r) => a + r.rating, 0);
+  assert.ok(Math.abs(sum - 1500 * 5) <= 5, `rating sum ${sum} not ~7500`);
+  // ratings sorted descending
+  for (let i = 1; i < elo.ratings.length; i++) {
+    assert.ok(elo.ratings[i - 1].rating >= elo.ratings[i].rating);
+  }
+  // series: start point at base, one point per game played
+  const zSeries = elo.series.find((s) => s.name === 'Zac');
+  assert.equal(zSeries.points[0].rating, 1500);
+  assert.equal(zSeries.points[0].gameId, null);
+  assert.equal(zSeries.points.length, 1 + by.Zac.games);
+
+  assert.deepEqual(eloRatings([]).ratings, []);
+  assert.deepEqual(eloRatings([]).series, []);
 });
 
 test('totalsOverTime: finished games in date order per player', () => {
