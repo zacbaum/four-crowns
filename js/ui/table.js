@@ -23,7 +23,7 @@ import { card as renderCard, handRow } from './cards-render.js';
 import { createGame, applyAction, legalActions } from '../engine/game.js';
 import { bestArrangement, shapesFor } from '../engine/solver.js';
 import { ROUNDS, RANK_NAMES, rank, suit, cardName, cardPoints, mulberry32 } from '../engine/cards.js';
-import { saveGame } from '../stats/store.js';
+import { saveGame, getSettings } from '../stats/store.js';
 import { saveResume, clearResume } from './resume.js';
 
 /* ------------------------------------------------------------------ */
@@ -427,8 +427,10 @@ const TB_CSS = `
 /* Required meld shape for the round, e.g. [3][3][4], filled = already made */
 .tb-shape-row {
   display: flex; align-items: center; justify-content: center; gap: 6px;
-  margin: 0 0 8px;
+  flex-wrap: wrap; margin: 0 0 8px;
 }
+.tb-shape-group { display: inline-flex; gap: 4px; }
+.tb-shape-or { font-size: 11px; color: rgba(255,255,255,.55); padding: 0 1px; }
 .tb-shape-label {
   font-size: 11px; letter-spacing: .05em; text-transform: uppercase;
   color: rgba(255,255,255,.72); margin-right: 2px;
@@ -575,6 +577,14 @@ export function startTable(container, opts) {
   const onGameEnd = typeof opts.onGameEnd === 'function' ? opts.onGameEnd : () => navigate('stats');
   const aiRng = mulberry32(((opts.config.seed | 0) ^ 0x9e3779b9) | 0);
 
+  // "No assist" mode: a local display preference (never synced — each player
+  // chooses their own). Strips every aid you wouldn't have with real cards:
+  // no meld grouping/underlines, no wild highlighting, no shape hints, no
+  // points readout. The hand is only ordered high-to-low at the deal; from
+  // then on it's arranged purely by hand.
+  let pure = false;
+  try { pure = !!getSettings().pureMode; } catch (e) { /* default assisted */ }
+
   // Resuming: a saved engine state replaces the fresh deal, and the stats
   // record id is reused so finishing later upgrades the same record.
   let state = opts.resumeState || createGame(opts.config);
@@ -641,7 +651,7 @@ export function startTable(container, opts) {
       // Kept the drawn card (discarded another): home it into its logical
       // spot — its new meld, or the deadwood by points — with a quick glide.
       // If the player already placed it by hand, their spot stands.
-      if (action.type === 'discard' && action.player === mySeat && seatIsLocal
+      if (!pure && action.type === 'discard' && action.player === mySeat && seatIsLocal
         && lastDrawn != null && action.card !== lastDrawn && !drawnMoved) {
         const h = state.hands[mySeat];
         if (h.includes(lastDrawn)) {
@@ -945,7 +955,8 @@ export function startTable(container, opts) {
     if (top === undefined) {
       discBtn.appendChild(el('span', 'tb-pile-empty'));
     } else {
-      discBtn.appendChild(renderCard(top, { wildRank: state.wildRank }));
+      // No-assist: render plainly so a wild in the pile isn't flagged for you.
+      discBtn.appendChild(renderCard(top, pure ? {} : { wildRank: state.wildRank }));
     }
     discBtn.appendChild(el('span', 'tb-pile-label', 'Discard'));
     const canTake = myDraw && leg.discard;
@@ -969,15 +980,20 @@ export function startTable(container, opts) {
     const hand = state.hands[mySeat];
     if (sel != null && hand.indexOf(sel) === -1) sel = null;
 
-    // The player owns the card ORDER (drag to rearrange, anytime); the solver
-    // still identifies the melds, shown as per-meld underlines plus a small
-    // gap wherever adjacent cards belong to different melds (or deadwood).
-    // Each round STARTS pre-sorted into the best arrangement (melds grouped,
-    // runs high-to-low, deadwood by points) — animated from the deal order so
-    // the sort is visible — and is the player's to rearrange from there.
+    // The player owns the card ORDER (drag to rearrange, anytime).
+    // Each round STARTS sorted — animated from the deal order so the sort is
+    // visible — and is the player's to rearrange from there. Assisted mode
+    // opens into the solver's best arrangement (melds grouped, runs high-to-
+    // low, deadwood by points); no-assist opens into a plain high-to-low sort.
     if (orderRound !== state.roundIndex) {
-      const dealt = arrangeHand(hand, state.wildRank, state.config.mode);
-      const sorted = [...dealt.melds.flat(), ...dealt.deadwood];
+      let sorted;
+      if (pure) {
+        sorted = hand.slice().sort((a, b) =>
+          cardPoints(b, state.wildRank) - cardPoints(a, state.wildRank) || suitW(a) - suitW(b));
+      } else {
+        const dealt = arrangeHand(hand, state.wildRank, state.config.mode);
+        sorted = [...dealt.melds.flat(), ...dealt.deadwood];
+      }
       sortAnimFrom = hand.slice(); // deal order, for the FLIP animation
       sortAnimDelay = 420;
       handOrder = sorted;
@@ -986,6 +1002,22 @@ export function startTable(container, opts) {
       handOrder = mergeOrder(handOrder, hand);
     }
     const ordered = handOrder;
+    const interactive = canDiscardNow();
+    const zoneW = Math.min(container.clientWidth || 390, 560) - 24;
+
+    // No-assist: plain row, no meld grouping/underlines, no wild flag, no
+    // points, no drawn-card glow — nothing you wouldn't have with real cards.
+    if (pure) {
+      const row = handRow(ordered, {
+        wildRank: 0, // 0 matches no rank -> wilds render as ordinary cards
+        selectedId: sel,
+        maxWidth: Math.max(160, zoneW),
+        onTap: interactive ? onCardTap : null,
+      });
+      row.classList.add('tb-hand');
+      for (let i = 0; i < ordered.length; i++) attachDrag(row.children[i], ordered[i]);
+      return { row, pointsLabel: null, meldSizes: [] };
+    }
 
     // A fresh draw stays OUT of the meld annotation until the player discards:
     // the underlines keep showing the hand as it was, and the new card sits
@@ -1015,8 +1047,6 @@ export function startTable(container, opts) {
     for (let i = 1; i < ordered.length; i++) {
       if (groupOf.get(ordered[i]) !== groupOf.get(ordered[i - 1])) boundaries++;
     }
-    const zoneW = Math.min(container.clientWidth || 390, 560) - 24;
-    const interactive = canDiscardNow();
 
     const row = handRow(ordered, {
       wildRank: state.wildRank,
@@ -1049,36 +1079,34 @@ export function startTable(container, opts) {
   }
 
   /**
-   * The round's required meld shape, e.g. 3·3·4 for the 10s round, with the
-   * slots the player's current melds already fill lit up. When a round has
-   * two shapes (12: 4+4+4 or 3+3+3+3), show whichever the hand is closer to.
+   * The round's required meld shape(s), e.g. 3·3·4 for the 10s round, with the
+   * slots the player's current melds already fill lit up. Rounds with more
+   * than one valid shape (the Qs round: 4·4·4 or 3·3·3·3) show BOTH from the
+   * start, joined by "or", each lit independently.
    */
   function buildShapeChips(meldSizes) {
     const shapes = shapesFor(state.handSize);
     if (!shapes.length) return null;
     const have = {};
     for (const s of meldSizes) have[s] = (have[s] || 0) + 1;
-    let best = shapes[0];
-    let bestScore = -1;
-    for (const sh of shapes) {
-      const need = {};
-      for (const s of sh) need[s] = (need[s] || 0) + 1;
-      let sc = 0;
-      for (const k in need) sc += Math.min(need[k], have[k] || 0);
-      if (sc > bestScore) { bestScore = sc; best = sh; }
-    }
+
     const row = el('div', 'tb-shape-row');
     row.appendChild(el('span', 'tb-shape-label', 'Melds needed'));
-    const slots = best.slice().sort((a, b) => a - b);
-    const remaining = { ...have };
-    let done = 0;
-    for (const s of slots) {
-      const filled = (remaining[s] || 0) > 0;
-      if (filled) { remaining[s]--; done++; }
-      row.appendChild(el('span', 'tb-shape-chip' + (filled ? ' tb-shape-done' : ''), String(s)));
-    }
-    row.setAttribute('aria-label',
-      `Melds needed this round: ${slots.join(', ')} — ${done} of ${slots.length} made`);
+    const labelParts = [];
+    shapes.forEach((sh, idx) => {
+      if (idx > 0) row.appendChild(el('span', 'tb-shape-or', 'or'));
+      const group = el('span', 'tb-shape-group');
+      const slots = sh.slice().sort((a, b) => a - b);
+      const remaining = { ...have };
+      for (const s of slots) {
+        const filled = (remaining[s] || 0) > 0;
+        if (filled) remaining[s]--;
+        group.appendChild(el('span', 'tb-shape-chip' + (filled ? ' tb-shape-done' : ''), String(s)));
+      }
+      row.appendChild(group);
+      labelParts.push(slots.join('·'));
+    });
+    row.setAttribute('aria-label', `Melds needed this round: ${labelParts.join(' or ')}`);
     return row;
   }
 
@@ -1365,14 +1393,14 @@ export function startTable(container, opts) {
     if (playing && state.turn === mySeat) me.classList.add('tb-active');
     const handWrap = el('div', 'tb-hand-wrap');
     const { row, pointsLabel, meldSizes } = buildMyHand();
-    if (playing) {
+    if (playing && !pure) {
       const chips = buildShapeChips(meldSizes);
       if (chips) me.appendChild(chips);
     }
     handWrap.appendChild(row);
     me.appendChild(handWrap);
     const meBar = el('div', 'tb-me-bar');
-    meBar.appendChild(el('span', 'tb-points-pill', pointsLabel));
+    if (pointsLabel) meBar.appendChild(el('span', 'tb-points-pill', pointsLabel));
     if (canDiscardNow()) {
       const discard = el('button', 'btn btn-primary tb-inline', 'Discard');
       discard.type = 'button';

@@ -86,13 +86,24 @@ registerScreen('home', {
               <span class="knob"></span>
             </span>
           </div>
+          <div class="row">
+            <label for="pure-mode">No-assist Mode
+              <span class="hint">no meld hints, wild flags or point counts — like real cards</span>
+            </label>
+            <span class="switch">
+              <input id="pure-mode" type="checkbox">
+              <span class="knob"></span>
+            </span>
+          </div>
         </section>
       </div>`;
 
     const nameInput = container.querySelector('#player-name');
     const hardToggle = container.querySelector('#hard-mode');
+    const pureToggle = container.querySelector('#pure-mode');
     nameInput.value = settings.playerName || '';
     hardToggle.checked = !!settings.hardMode;
+    pureToggle.checked = !!settings.pureMode;
 
     nameInput.addEventListener('change', () => {
       try { saveSettings({ playerName: nameInput.value.trim() }); }
@@ -100,6 +111,10 @@ registerScreen('home', {
     });
     hardToggle.addEventListener('change', () => {
       try { saveSettings({ hardMode: hardToggle.checked }); }
+      catch (e) { console.error('settings save failed', e); }
+    });
+    pureToggle.addEventListener('change', () => {
+      try { saveSettings({ pureMode: pureToggle.checked }); }
       catch (e) { console.error('settings save failed', e); }
     });
 
