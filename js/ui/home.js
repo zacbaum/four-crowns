@@ -6,7 +6,7 @@ import { registerScreen, navigate, toast } from './app.js';
 import { getSettings, saveSettings } from '../stats/store.js';
 import { loadResume, clearResume } from './resume.js';
 
-const AI_LEVELS = ['easy', 'medium', 'hard'];
+const AI_LEVELS = ['easy', 'medium', 'hard', 'expert'];
 let aiLevel = 'medium'; // session-sticky difficulty choice
 
 /**

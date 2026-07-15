@@ -1,8 +1,8 @@
 /**
  * AI opponent tests: legality/termination/card-conservation across full
- * AI-vs-AI games, the difficulty ordering (easy < medium < hard) measured by
- * seat-balanced self-play, and information hygiene (the AI never reads the
- * opponent's hand).
+ * AI-vs-AI games, the difficulty ordering (easy < medium < hard < expert)
+ * measured by seat-balanced self-play, and information hygiene (the AI never
+ * reads the opponent's hand).
  *
  * Run: node --test "tests/ai.test.mjs"   (the bare `node --test tests/`
  * directory form is broken on Node 24 / Windows — use the glob).
@@ -87,7 +87,7 @@ function decidedWinRate(A, B, seeds, { mode = 'normal', base = 500 } = {}) {
 // Legality, termination, card conservation
 // ---------------------------------------------------------------------------
 
-for (const level of ['easy', 'medium', 'hard']) {
+for (const level of ['easy', 'medium', 'hard', 'expert']) {
   test(`${level}: 30 full AI-vs-AI games are legal, terminate, conserve cards`, () => {
     for (let g = 0; g < 30; g++) {
       const r = playGame([level, level], 7000 + g * 31, { check: true });
@@ -97,7 +97,7 @@ for (const level of ['easy', 'medium', 'hard']) {
 }
 
 test('mixed-level games also stay legal and terminate', () => {
-  const pairs = [['easy', 'hard'], ['medium', 'hard'], ['easy', 'medium']];
+  const pairs = [['easy', 'hard'], ['medium', 'hard'], ['easy', 'medium'], ['expert', 'hard']];
   for (const pair of pairs) {
     for (let g = 0; g < 10; g++) playGame(pair, 8000 + g * 13, { check: true, mode: g % 2 ? 'hard' : 'normal' });
   }
@@ -131,6 +131,13 @@ test('hard is at least as strong as medium', { timeout: 180000 }, () => {
   assert.ok(rate >= 0.50, `hard vs medium = ${rate.toFixed(3)}; expected >= 0.50`);
 });
 
+test('expert clearly beats hard', { timeout: 300000 }, () => {
+  // Tournament-measured mean is ~0.68 over 1000 held-out games (see
+  // js/ai/emax.js provenance); 0.55 leaves a wide non-flaky margin.
+  const { rate, aWin, bWin } = decidedWinRate('expert', 'hard', 110);
+  assert.ok(rate > 0.55, `expert vs hard = ${rate.toFixed(3)} (${aWin}-${bWin}); expected > 0.55`);
+});
+
 // ---------------------------------------------------------------------------
 // Information hygiene: the AI must never read the opponent's hand
 // ---------------------------------------------------------------------------
@@ -143,7 +150,7 @@ function handTrap(seat) {
   });
 }
 
-for (const level of ['easy', 'medium', 'hard']) {
+for (const level of ['easy', 'medium', 'hard', 'expert']) {
   test(`${level}: never touches the opponent's hand during a decision`, () => {
     // Same level on both seats to exercise the level from both perspectives.
     let s = createGame({ mode: level === 'hard' ? 'hard' : 'normal', seed: 24680, players: [{ name: 'A' }, { name: 'B' }] });

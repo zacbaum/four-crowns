@@ -13,7 +13,7 @@
 
 const KEY = 'fourcrowns.v1';
 const KINDS = ['ai', 'online', 'scorekeeper'];
-const AI_LEVELS = ['easy', 'medium', 'hard'];
+const AI_LEVELS = ['easy', 'medium', 'hard', 'expert'];
 const ROUND_NUMBERS = new Set([3, 4, 6, 7, 8, 9, 10, 11, 12, 13]);
 
 function freshDB() {

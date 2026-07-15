@@ -5,7 +5,7 @@
  * to invalidate; activate cleans old caches.
  */
 
-const CACHE_VERSION = 'v18';
+const CACHE_VERSION = 'v19';
 const CACHE_NAME = `fourcrowns-${CACHE_VERSION}`;
 
 const APP_SHELL = [
@@ -27,6 +27,7 @@ const APP_SHELL = [
   './js/engine/solver.js',
   './js/engine/game.js',
   './js/ai/ai.js',
+  './js/ai/emax.js',
   './js/net/sync.js',
   './js/stats/store.js',
   './js/stats/analytics.js',

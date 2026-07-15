@@ -17,6 +17,10 @@
  *            can, correct end-game (strict-shape) scoring in hard-mode games,
  *            and a non-harmful defensive tie-break (avoids feeding cards near
  *            ones it has seen the opponent take).
+ *   expert - the tournament champion (js/ai/emax.js): expected-value draw and
+ *            discard decisions with probability-weighted card counting and
+ *            dynamic risk. Beats 'hard' ~68% of decided games (held-out
+ *            mirrored-deal measurement; see emax.js for provenance).
  *   hard   - an expert layered on the greedy core: WILDS ARE PROTECTED (never
  *            dumped just to save points); draws and keeps are gated by CARD
  *            COUNTING so it never chases a book/run whose cards are already
@@ -44,6 +48,7 @@
 import { rank, suit, cardPoints, isWild, makeCard } from '../engine/cards.js';
 import { bestArrangement } from '../engine/solver.js';
 import { legalActions } from '../engine/game.js';
+import { emaxAction } from './emax.js';
 
 const ENV = typeof process !== 'undefined' && process.env ? process.env : {};
 // easy/medium share one greedy policy; easy plays a fraction of turns
@@ -505,7 +510,7 @@ function expertAction(state, rng) {
  * Decide the current player's next action for the state's phase
  * ('draw' -> a draw action, 'discard' -> a discard action; 'roundEnd' ->
  * acknowledge). Never returns an illegal action. Uses rng for tie-breaking.
- * @param {'easy'|'medium'|'hard'} level
+ * @param {'easy'|'medium'|'hard'|'expert'} level
  * @param {object} state - full game state; the AI reads only its own hand and
  *   public information (discard pile, counts, round info).
  * @param {() => number} rng - returns floats in [0, 1)
@@ -524,6 +529,8 @@ export function chooseAction(level, state, rng) {
     action = hardAction(state, rand);
   } else if (level === 'hard') {
     action = expertAction(state, rand);
+  } else if (level === 'expert') {
+    action = emaxAction(state, rand);
   } else {
     throw new Error(`Unknown AI level: ${level}`);
   }
