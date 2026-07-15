@@ -14,7 +14,7 @@ all tests. If code disagrees with this file, the code is wrong.
 ## Rounds
 
 Ten rounds. Hand size equals the round number. **The 5-card round is skipped**
-(a 5-card hand cannot be partitioned into melds of size 3 and 4).
+(a 5-card hand cannot be partitioned into sets of size 3 and 4).
 
 | # | Round | Hand size | Wild rank |
 |---|-------|-----------|-----------|
@@ -34,27 +34,27 @@ Aces, 2s and 5s are never wild.
 ## Wild cards
 
 - In each round, all four cards of the wild rank are wild.
-- A wild card may substitute for **any** card in a group or a run.
+- A wild card may substitute for **any** card in a book or a run.
 - A wild may also be played as its natural self (e.g. in round 7, 7♠ 7♥ 7♦ is
-  simply a group of 7s — note that because all wilds share one rank, a set of
-  3–4 wilds is always also a natural group, so this never creates ambiguity).
-- An unmelded wild scores **25 points**.
+  simply a book of 7s — note that because all wilds share one rank, a book of
+  3–4 wilds is always also a natural book, so this never creates ambiguity).
+- A wild not in a set scores **25 points**.
 
-## Melds
+## Sets
 
-Only two meld shapes exist, and **every meld is exactly 3 or 4 cards**:
+Only two set shapes exist, and **every set is exactly 3 or 4 cards**:
 
-1. **Group**: 3 or 4 cards of the same rank (suits irrelevant). Wilds may fill
+1. **Book**: 3 or 4 cards of the same rank (suits irrelevant). Wilds may fill
    any slots; the natural (non-wild) cards must all share one rank.
 2. **Run**: 3 or 4 consecutive ranks in a **single suit** (e.g. 8♦ 9♦ 10♦).
    Wilds may fill any slots; the naturals must all be the same suit and must fit
-   a window of consecutive ranks of the meld's size within A..K (A low, no
-   wraparound). Runs of 5 or more are NOT melds (a 6-card same-suit sequence
-   melds only as two runs of 3, etc.).
+   a window of consecutive ranks of the run's size within A..K (A low, no
+   wraparound). Runs of 5 or more are NOT valid (a 6-card same-suit sequence
+   forms two runs of 3, etc.).
 
-A card can belong to at most one meld.
+A card can belong to at most one set.
 
-## Card points (unmelded cards only)
+## Card points (cards not in a set only)
 
 | Card | Points |
 |------|--------|
@@ -65,7 +65,7 @@ A card can belong to at most one meld.
 | Q | 12 |
 | K | 13 |
 
-Melded cards score 0.
+Cards in a set score 0.
 
 ## Play
 
@@ -82,14 +82,14 @@ Melded cards score 0.
 ## Going out and ending a round
 
 - After discarding, if **every** card remaining in your hand can be arranged
-  into valid melds, you **go out**: reveal your melds and score **0** for the
-  round. (Because every meld is size 3 or 4, a fully-melded hand automatically
+  into valid sets, you **go out**: reveal your sets and score **0** for the
+  round. (Because every set is size 3 or 4, a fully-formed hand automatically
   satisfies the round's hard-mode shape, so going out is identical in both
   modes.)
 - Your opponent then gets **exactly one final turn** (draw + discard), after
-  which the round ends and they score their hand (0 if they also fully meld —
+  which the round ends and they score their hand (0 if they also form full sets —
   no bonus either way).
-- Scoring a caught hand: arrange it to **minimize** points; melded cards score
+- Scoring a caught hand: arrange it to **minimize** points; cards in a set score
   0 and every other card scores its point value (wilds 25). The engine always
   computes the optimal arrangement for the player.
 
@@ -98,7 +98,7 @@ Melded cards score 0.
 Hard mode changes only how a **caught** (non-going-out) hand is scored.
 
 Each round's hand size N has a set of valid **shapes** — the ways N partitions
-into meld sizes 3 and 4:
+into set sizes 3 and 4:
 
 | N | Valid shapes |
 |---|--------------|
@@ -113,20 +113,20 @@ into meld sizes 3 and 4:
 | 12 | {4,4,4} and {3,3,3,3} |
 | 13 | {3,3,3,4} |
 
-**Strict-shape rule**: a set of claimed melds is legal only if the multiset of
+**Strict-shape rule**: the sets you claim are legal only if the multiset of
 their sizes can be **extended to a complete valid shape** for that round (i.e.
 it is a sub-multiset of some valid shape of N).
 
 Examples:
-- Round 8 (shape {4,4}): holding a 3-meld and a 4-meld, the 3-meld does NOT
+- Round 8 (shape {4,4}): holding a 3-card set and a 4-card set, the 3-card set does NOT
   count ({3} extends to no shape of 8). You score the 4 cards outside the
-  4-meld — not just the 1 loose card.
-- Round 10 (shape {3,3,4}): holding two 4-melds and 2 loose cards, only ONE
-  4-meld counts ({4,4} extends to no shape of 10). You score 6.
+  4-card set — not just the 1 loose card.
+- Round 10 (shape {3,3,4}): holding two 4-card sets and 2 loose cards, only ONE
+  4-card set counts ({4,4} extends to no shape of 10). You score 6.
 - Round 12: {4,4} is legal (extends to {4,4,4}); {3,4} is NOT (neither shape of
   12 contains both a 3 and a 4).
 
-Scoring in hard mode = the minimum points over all legal claimed-meld sets.
+Scoring in hard mode = the minimum points over all legal claimed-set combinations.
 
 ## Game end
 

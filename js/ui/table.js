@@ -30,7 +30,7 @@ import { saveResume, clearResume } from './resume.js';
 /* Pure helpers (no DOM) — exported for node sanity tests              */
 /* ------------------------------------------------------------------ */
 
-const MELD_COLORS = ['#e9c46a', '#7ec8a9', '#9ec5ff', '#eaa9dd'];
+const SET_COLORS = ['#e9c46a', '#7ec8a9', '#9ec5ff', '#eaa9dd'];
 const GROUP_GAP = 12; // extra px between meld groups / deadwood in the hand row
 
 /** Display suit order, left to right: ♠ ♣ ♦ ♥ (engine suit ids 0,3,2,1). */
@@ -54,7 +54,7 @@ export function arrangeHand(hand, wildRank, mode) {
   let effMode = mode;
   if (mode === 'hard' && shapesFor(hand.length).length === 0) effMode = 'normal';
   const arr = bestArrangement(hand, wildRank, effMode);
-  const melds = arr.melds.map(m => displayMeld(m, wildRank));
+  const melds = arr.melds.map(m => displaySet(m, wildRank));
   melds.sort((a, b) => rank(b[0]) - rank(a[0]) || suitW(a[0]) - suitW(b[0]));
   const deadwood = arr.deadwood
     .slice()
@@ -74,7 +74,7 @@ export function arrangeHand(hand, wildRank, mode) {
  * @param {number} wildRank
  * @returns {number[]} the same cards, display-ordered
  */
-export function displayMeld(meld, wildRank) {
+export function displaySet(meld, wildRank) {
   const naturals = meld.filter((c) => rank(c) !== wildRank);
   const wilds = meld.filter((c) => rank(c) === wildRank);
   const distinct = new Set(naturals.map(rank));
@@ -398,9 +398,9 @@ const TB_CSS = `
 
 .tb-me { padding-bottom: 2px; }
 .tb-hand-wrap { touch-action: none; padding-bottom: 10px; }
-.tb-meldcard::after {
+.tb-setcard::after {
   content: ""; position: absolute; left: 7%; right: 7%; bottom: -6px; height: 4px;
-  border-radius: 2px; background: var(--tb-meld-color, var(--gold));
+  border-radius: 2px; background: var(--tb-set-color, var(--gold));
 }
 .tb-me-bar { display: flex; align-items: center; gap: 10px; margin: 2px 0 8px; min-height: 46px; }
 .tb-points-pill {
@@ -510,9 +510,9 @@ const TB_CSS = `
 .tb-reveal-cards {
   display: flex; flex-wrap: wrap; gap: 12px 14px; --card-w: 36px; align-items: flex-start;
 }
-.tb-meld-group {
+.tb-set-group {
   display: flex; gap: 3px; padding-bottom: 5px;
-  border-bottom: 3px solid var(--tb-meld-color, var(--gold)); border-radius: 2px;
+  border-bottom: 3px solid var(--tb-set-color, var(--gold)); border-radius: 2px;
 }
 .tb-dw-group { display: flex; flex-wrap: wrap; gap: 6px; }
 .tb-dw { display: flex; flex-direction: column; align-items: center; gap: 3px; }
@@ -1062,8 +1062,8 @@ export function startTable(container, opts) {
       const g = groupOf.get(id);
       const cardEl = cardEls[i];
       if (g >= 0) {
-        cardEl.classList.add('tb-meldcard');
-        cardEl.style.setProperty('--tb-meld-color', MELD_COLORS[g % MELD_COLORS.length]);
+        cardEl.classList.add('tb-setcard');
+        cardEl.style.setProperty('--tb-set-color', SET_COLORS[g % SET_COLORS.length]);
       }
       if (id === freshDraw) cardEl.classList.add('tb-newcard');
       if (i > 0 && g !== groupOf.get(ordered[i - 1])) {
@@ -1091,7 +1091,7 @@ export function startTable(container, opts) {
     for (const s of meldSizes) have[s] = (have[s] || 0) + 1;
 
     const row = el('div', 'tb-shape-row');
-    row.appendChild(el('span', 'tb-shape-label', 'Melds needed'));
+    row.appendChild(el('span', 'tb-shape-label', 'Sets needed'));
     const labelParts = [];
     shapes.forEach((sh, idx) => {
       if (idx > 0) row.appendChild(el('span', 'tb-shape-or', 'or'));
@@ -1106,7 +1106,7 @@ export function startTable(container, opts) {
       row.appendChild(group);
       labelParts.push(slots.join('·'));
     });
-    row.setAttribute('aria-label', `Melds needed this round: ${labelParts.join(' or ')}`);
+    row.setAttribute('aria-label', `Sets needed this round: ${labelParts.join(' or ')}`);
     return row;
   }
 
@@ -1165,10 +1165,10 @@ export function startTable(container, opts) {
     const cardsWrap = el('div', 'tb-reveal-cards');
     const a = res.arrangements[p];
     a.melds
-      .map((m) => displayMeld(m, res.wildRank))
+      .map((m) => displaySet(m, res.wildRank))
       .forEach((m, i) => {
-        const g = el('div', 'tb-meld-group');
-        g.style.setProperty('--tb-meld-color', MELD_COLORS[i % MELD_COLORS.length]);
+        const g = el('div', 'tb-set-group');
+        g.style.setProperty('--tb-set-color', SET_COLORS[i % SET_COLORS.length]);
         for (const c of m) g.appendChild(renderCard(c, { wildRank: res.wildRank }));
         cardsWrap.appendChild(g);
       });
@@ -1185,7 +1185,7 @@ export function startTable(container, opts) {
       }
       cardsWrap.appendChild(dw);
     } else {
-      cardsWrap.appendChild(el('span', 'tb-none', 'fully melded — 0 points'));
+      cardsWrap.appendChild(el('span', 'tb-none', 'all in sets — 0 points'));
     }
     box.appendChild(cardsWrap);
     return box;

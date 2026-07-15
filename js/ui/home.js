@@ -79,7 +79,7 @@ registerScreen('home', {
           </div>
           <div class="row">
             <label for="hard-mode">Hard Mode
-              <span class="hint">strict meld shapes when caught</span>
+              <span class="hint">strict set shapes when caught</span>
             </label>
             <span class="switch">
               <input id="hard-mode" type="checkbox">
@@ -88,7 +88,7 @@ registerScreen('home', {
           </div>
           <div class="row">
             <label for="pure-mode">No-assist Mode
-              <span class="hint">no meld hints, wild flags or point counts — like real cards</span>
+              <span class="hint">no set hints, wild flags or point counts — like real cards</span>
             </label>
             <span class="switch">
               <input id="pure-mode" type="checkbox">
@@ -233,14 +233,14 @@ const RULES_HTML = `
   <div class="rules-content">
     <h2>The basics</h2>
     <p><strong>Four Crowns</strong> is a two-player rummy game played with one
-    standard 52-card deck — no jokers. Arrange your whole hand into melds
+    standard 52-card deck — no jokers. Arrange your whole hand into sets
     before your opponent does, and keep your total score as <strong>low</strong>
     as possible. After the final round, the <strong>lowest total wins</strong>.</p>
 
     <h2>Rounds</h2>
     <p>Ten rounds. Your hand size equals the round number, and every card of
     that round's rank is <span class="wild-note">wild ★</span>. The 5-card
-    round is skipped (a 5-card hand can't split into melds of 3 and 4).</p>
+    round is skipped (a 5-card hand can't split into sets of 3 and 4).</p>
     <div class="table-wrap"><table>
       <tr><th>Round</th><th>Cards in hand</th><th>Wild rank</th></tr>
       <tr><td>3s</td><td>3</td><td>3</td></tr>
@@ -266,26 +266,26 @@ const RULES_HTML = `
     stock runs out, the discard pile (except its top card) is shuffled into a
     new stock.</p>
 
-    <h2>Melds</h2>
-    <p>Every meld is <strong>exactly 3 or 4 cards</strong>:</p>
+    <h2>Sets</h2>
+    <p>A <strong>set</strong> is a book or a run, <strong>exactly 3 or 4 cards</strong>:</p>
     <ul>
-      <li><strong>Group</strong> — 3–4 cards of the same rank
+      <li><strong>Book</strong> — 3–4 cards of the same rank
       (e.g.&nbsp;9♠&nbsp;9♥&nbsp;9♣). Suits don't matter.</li>
       <li><strong>Run</strong> — 3–4 consecutive ranks in one suit
       (e.g.&nbsp;8♦&nbsp;9♦&nbsp;10♦). Ace is <em>low only</em>: A-2-3 works,
-      Q-K-A does not. Runs of 5+ are not melds.</li>
+      Q-K-A does not. Runs of 5+ are not valid.</li>
     </ul>
-    <p>Wilds substitute for any card in a group or run, or count as their
-    natural rank. A card can belong to only one meld.</p>
+    <p>Wilds substitute for any card in a book or run, or count as their
+    natural rank. A card can belong to only one set.</p>
 
     <h2>Going out</h2>
     <p>After discarding, if <em>every</em> card left in your hand fits into
-    valid melds, you <strong>go out</strong> and score <strong>0</strong> for
+    valid sets, you <strong>go out</strong> and score <strong>0</strong> for
     the round. Your opponent then gets <strong>exactly one final turn</strong>
     before their hand is scored. Their hand is arranged as cheaply as possible
-    — melded cards score 0, everything else counts against them:</p>
+    — cards in a set score 0, everything else counts against them:</p>
     <div class="table-wrap"><table>
-      <tr><th>Unmelded card</th><th>Points</th></tr>
+      <tr><th>Card not in a set</th><th>Points</th></tr>
       <tr><td><span class="wild-note">Wild ★</span> (round rank)</td><td>25</td></tr>
       <tr><td>Ace</td><td>1</td></tr>
       <tr><td>2–10</td><td>face value</td></tr>
@@ -295,7 +295,7 @@ const RULES_HTML = `
     <h2>Hard Mode</h2>
     <p>Hard Mode only changes how a <em>caught</em> hand is scored. Each
     round's hand size has a fixed set of valid <strong>shapes</strong> — the
-    ways it splits into melds of 3 and 4. Claimed melds only count if their
+    ways it splits into sets of 3 and 4. Claimed sets only count if their
     sizes fit into one of those shapes:</p>
     <div class="table-wrap"><table>
       <tr><th>Hand size</th><th>Valid shapes</th></tr>
@@ -311,10 +311,10 @@ const RULES_HTML = `
       <tr><td>13</td><td>3+3+3+4</td></tr>
     </table></div>
     <div class="example"><strong>Example — round 8</strong> (shape 4+4): you
-    are caught holding a 3-card meld and a 4-card meld. The 3-card meld does
+    are caught holding a 3-card set and a 4-card set. The 3-card set does
     <em>not</em> count, because no shape of 8 contains a 3. You score all
-    4 cards outside the 4-card meld — not just the single loose card.</div>
-    <p>Going out is unaffected: a fully-melded hand always fits the round's
+    4 cards outside the 4-card set — not just the single loose card.</div>
+    <p>Going out is unaffected: a hand that's all sets always fits the round's
     shape, so it scores 0 in both modes.</p>
 
     <h2>Winning</h2>

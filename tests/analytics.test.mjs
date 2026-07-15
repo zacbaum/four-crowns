@@ -12,7 +12,7 @@ import {
   ROUND_ORDER, roundLabel, filterGames, playerAggregates, headToHead,
   averageScores, roundStats, trajectory, goingOutStats, caughtDistribution,
   singleRoundRecords, eloRatings, totalsOverTime, streaks,
-  meldStats, classifyMeld, roundLengthStats,
+  setStats, classifySet, roundLengthStats,
 } from '../js/stats/analytics.js';
 
 const approx = (actual, expected, msg) => {
@@ -409,58 +409,59 @@ test('streaks: ties and losses break; current counts from most recent', () => {
   assert.deepEqual(streaks([g5], 'Zac'), { current: 0, longest: 0 });
 });
 
-test('classifyMeld: groups, runs, wild handling', () => {
+test('classifySet: books, runs, wild handling', () => {
   // Card ids: id = suit*13 + (rank-1); suits ♠0 ♥1 ♦2 ♣3.
-  // Plain group: 5♠ 5♥ 5♦ (+5♣) with 3s wild
-  assert.deepEqual(classifyMeld([4, 17, 30], 3), { kind: 'group', rank: 5, wilds: 0 });
-  assert.deepEqual(classifyMeld([4, 17, 30, 43], 3), { kind: 'group', rank: 5, wilds: 0 });
+  // Plain book: 5♠ 5♥ 5♦ (+5♣) with 3s wild
+  assert.deepEqual(classifySet([4, 17, 30], 3), { kind: 'book', rank: 5, wilds: 0 });
+  assert.deepEqual(classifySet([4, 17, 30, 43], 3), { kind: 'book', rank: 5, wilds: 0 });
   // Plain run: 3♠ 4♠ 5♠ with 7s wild
-  assert.deepEqual(classifyMeld([2, 3, 4], 7), { kind: 'run', suit: 0, wilds: 0 });
+  assert.deepEqual(classifySet([2, 3, 4], 7), { kind: 'run', suit: 0, wilds: 0 });
   // Run using a wild: 9♥ 10♥ + 7♠ (round of 7s)
-  assert.deepEqual(classifyMeld([21, 22, 6], 7), { kind: 'run', suit: 1, wilds: 1 });
-  // All wild-rank cards are just a natural group of that rank: 6♠ 6♥ 6♦ in 6s
-  assert.deepEqual(classifyMeld([5, 18, 31], 6), { kind: 'group', rank: 6, wilds: 0 });
-  // Single natural + wilds counts as a group of the natural: 9♦ + 4♠ 4♥ in 4s
-  assert.deepEqual(classifyMeld([34, 3, 16], 4), { kind: 'group', rank: 9, wilds: 2 });
+  assert.deepEqual(classifySet([21, 22, 6], 7), { kind: 'run', suit: 1, wilds: 1 });
+  // All wild-rank cards are just a natural book of that rank: 6♠ 6♥ 6♦ in 6s
+  assert.deepEqual(classifySet([5, 18, 31], 6), { kind: 'book', rank: 6, wilds: 0 });
+  // Single natural + wilds counts as a book of the natural: 9♦ + 4♠ 4♥ in 4s
+  assert.deepEqual(classifySet([34, 3, 16], 4), { kind: 'book', rank: 9, wilds: 2 });
 });
 
-test('meldStats: aggregates per player over rounds with meld data', () => {
+test('setStats: aggregates per player over rounds with set data', () => {
   const gm = mkGame({
     id: 'm1', dateISO: '2026-02-01T12:00:00.000Z', kind: 'ai', players: ['Zac', 'Bot'],
     rounds: [
-      // Zac: group of 5s; Bot: no melds (still a recorded meld round)
+      // Zac: book of 5s; Bot: no sets (still a recorded set round). The stored
+      // per-round field is still named `melds` for backward compatibility.
       { round: 3, scores: [0, 7], wentOut: 0, melds: [[[4, 17, 30]], []] },
-      // Zac: ♥ run with one wild + group of Qs; Bot: ♠ run
+      // Zac: ♥ run with one wild + book of Qs; Bot: ♠ run
       { round: 7, scores: [0, 10], wentOut: 0,
         melds: [[[21, 22, 6], [11, 24, 37]], [[2, 3, 4]]] },
-      // No meld data recorded this round -> ignored entirely
+      // No set data recorded this round -> ignored entirely
       { round: 8, scores: [4, 0], wentOut: 1 },
     ],
     totals: [4, 17], winner: 0,
   });
-  const all = [...GAMES, gm]; // legacy fixture games have no melds
-  const zac = meldStats(all, 'Zac');
+  const all = [...GAMES, gm]; // legacy fixture games have no set data
+  const zac = setStats(all, 'Zac');
   assert.equal(zac.rounds, 2);
-  assert.equal(zac.melds, 3);
-  assert.equal(zac.groups, 2);
+  assert.equal(zac.sets, 3);
+  assert.equal(zac.books, 2);
   assert.equal(zac.runs, 1);
-  assert.equal(zac.groupsByRank[5 - 1].count, 1);  // the 5s group
-  assert.equal(zac.groupsByRank[12 - 1].count, 1); // the Qs group
+  assert.equal(zac.booksByRank[5 - 1].count, 1);  // the 5s book
+  assert.equal(zac.booksByRank[12 - 1].count, 1); // the Qs book
   assert.equal(zac.runsBySuit[1].count, 1);        // the ♥ run
-  assert.equal(zac.meldsWithWilds, 1);
+  assert.equal(zac.setsWithWilds, 1);
   assert.equal(zac.wildsUsed, 1);
   approx(zac.avgWildsPerRound, 0.5);
-  approx(zac.wildMeldShare, 1 / 3);
-  const bot = meldStats(all, 'Bot');
+  approx(zac.wildSetShare, 1 / 3);
+  const bot = setStats(all, 'Bot');
   assert.equal(bot.rounds, 2);
-  assert.equal(bot.melds, 1);
+  assert.equal(bot.sets, 1);
   assert.equal(bot.runs, 1);
   assert.equal(bot.runsBySuit[0].count, 1); // the ♠ run
-  const nobody = meldStats(all, 'Nobody');
+  const nobody = setStats(all, 'Nobody');
   assert.equal(nobody.rounds, 0);
   assert.equal(nobody.avgWildsPerRound, null);
-  assert.equal(nobody.wildMeldShare, null);
-  assert.deepEqual(meldStats([], 'Zac').melds, 0);
+  assert.equal(nobody.wildSetShare, null);
+  assert.deepEqual(setStats([], 'Zac').sets, 0);
 });
 
 test('roundLengthStats: distribution of turns to go out', () => {

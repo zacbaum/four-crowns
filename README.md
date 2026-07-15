@@ -12,7 +12,7 @@ app.
 ## The game
 
 Ten rounds. The hand size is the round number and that rank is **wild**
-(the 5-card round is skipped, since five cards can't be split into melds of 3
+(the 5-card round is skipped, since five cards can't be split into sets of 3
 and 4):
 
 | Round | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 |
@@ -20,19 +20,19 @@ and 4):
 | Cards / wild | 3 | 4 | 6 | 7 | 8 | 9 | 10 | J | Q | K |
 
 On your turn, draw one card (from the stock or the discard pile) and discard
-one. Arrange your hand into **melds** — every meld is exactly 3 or 4 cards:
+one. Arrange your hand into **sets** — every set is exactly 3 or 4 cards:
 
-- **Group** — 3–4 cards of the same rank.
+- **Book** — 3–4 cards of the same rank.
 - **Run** — 3–4 consecutive cards of one suit (Ace is low; no wrap-around).
 
-Wild cards (the round's rank) stand in for any card. When your whole hand melds,
+Wild cards (the round's rank) stand in for any card. When your whole hand forms sets,
 you **go out** and score 0; your opponent gets one last turn, then scores the
 cards they're caught holding: A = 1, 2–10 = face value, J/Q/K = 11/12/13, and a
 wild = 25. Lowest cumulative total after the K round wins.
 
-**Hard Mode** changes only how a caught hand scores: your melds count only if
+**Hard Mode** changes only how a caught hand scores: your sets count only if
 their sizes can still complete a valid shape for the round (e.g. in the 8-card
-round the only shape is 4+4, so a 3-card meld doesn't count). Full rules are in
+round the only shape is 4+4, so a 3-card set doesn't count). Full rules are in
 [docs/RULES.md](docs/RULES.md) and on the app's *How to Play* screen.
 
 ## Three ways to play
@@ -72,7 +72,7 @@ npm test           # engine, solver, analytics and AI test suites
 
 ## How it's built
 
-- `js/engine/` — pure, deterministic game engine: card math, an exact meld
+- `js/engine/` — pure, deterministic game engine: card math, an exact set
   solver (optimal hand arrangement in both modes), and the turn state machine.
 - `js/ai/` — the AI opponents.
 - `js/ui/` — screens (home, game table, scorekeeper, stats, online) and a tiny

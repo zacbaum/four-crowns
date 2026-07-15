@@ -21,7 +21,7 @@ import {
 import {
   filterGames, playerAggregates, headToHead, averageScores, roundStats,
   trajectory, goingOutStats, caughtDistribution, singleRoundRecords,
-  eloRatings, totalsOverTime, streaks, meldStats, roundLengthStats,
+  eloRatings, totalsOverTime, streaks, setStats, roundLengthStats,
 } from '../stats/analytics.js';
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
@@ -948,12 +948,12 @@ function recordsCard(games, youName) {
   return card;
 }
 
-function meldTrendsCard(games, youName) {
-  const ms = meldStats(games, youName);
-  const card = chartCard('Meld trends', `What ${youName}'s melds are made of (games played in the app)`);
+function setTrendsCard(games, youName) {
+  const ms = setStats(games, youName);
+  const card = chartCard('Set trends', `What ${youName}'s sets are made of (games played in the app)`);
   if (ms.rounds === 0) {
     card.appendChild(h('p', 'st-note',
-      'Meld details are recorded for games played in the app (vs AI or online). Real-card games can’t include them — play a digital game and your groups, runs and wild usage will show up here.'));
+      'Set details are recorded for games played in the app (vs AI or online). Real-card games can’t include them — play a digital game and your books, runs and wild usage will show up here.'));
     return card;
   }
 
@@ -966,23 +966,23 @@ function meldTrendsCard(games, youName) {
     if (sub) b.appendChild(h('div', 'st-extreme-sub', sub));
     return b;
   };
-  grid.appendChild(box('Groups vs runs', `${ms.groups} / ${ms.runs}`,
-    `${ms.melds} melds over ${ms.rounds} rounds`));
-  grid.appendChild(box('Melds with a wild', fmtPct(ms.wildMeldShare),
+  grid.appendChild(box('Books vs runs', `${ms.books} / ${ms.runs}`,
+    `${ms.sets} sets over ${ms.rounds} rounds`));
+  grid.appendChild(box('Sets with a wild', fmtPct(ms.wildSetShare),
     `${ms.wildsUsed} wilds used in total`));
   grid.appendChild(box('Wilds per round', fmtNum(ms.avgWildsPerRound, 1),
-    'average, in your melds'));
+    'average, in your sets'));
   card.appendChild(grid);
 
-  // Groups by rank (A..K)
-  card.appendChild(h('p', 'st-card-sub', 'Groups by rank'));
+  // Books by rank (A..K)
+  card.appendChild(h('p', 'st-card-sub', 'Books by rank'));
   renderBars(card, {
-    groups: ms.groupsByRank.map((b) => ({ label: b.label, values: [b.count] })),
-    seriesNames: ['Groups'],
+    groups: ms.booksByRank.map((b) => ({ label: b.label, values: [b.count] })),
+    seriesNames: ['Books'],
     colors: [SERIES[0]],
     valueFmt: (v) => (v == null ? '—' : String(v)),
-    tipTitle: (gi) => `Groups of ${ms.groupsByRank[gi].label}s`,
-    ariaLabel: `${youName}'s groups by rank, ${ms.groups} groups`,
+    tipTitle: (gi) => `Books of ${ms.booksByRank[gi].label}s`,
+    ariaLabel: `${youName}'s books by rank, ${ms.books} books`,
     labelMax: true,
   });
 
@@ -1326,7 +1326,7 @@ function render() {
   root.appendChild(totalsOverTimeCard(games, pair));
   root.appendChild(distributionCard(games, youName));
   root.appendChild(goingOutCard(games, pair));
-  root.appendChild(meldTrendsCard(games, youName));
+  root.appendChild(setTrendsCard(games, youName));
   root.appendChild(roundLengthCard(games));
   const elo = eloCard(games, youName, pair);
   if (elo) root.appendChild(elo);
