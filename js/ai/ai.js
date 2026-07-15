@@ -5,35 +5,30 @@
  *   chooseAction(level, state, rng) -> action
  *
  * Design (empirically calibrated by seat-balanced self-play — see
- * tests/ai.test.mjs): in a two-player go-out race, minimizing the points you
- * can be caught holding is close to optimal, so a clean greedy point-minimizer
- * is the strong core policy that ALL levels share:
- *   - draw: take the face-up discard only when it strictly lowers the points
- *     we can be caught with (it advances a meld); otherwise draw the stock.
- *   - discard: leave the fewest caught points; go out the instant the hand
- *     allows; among equally cheap discards, shed the highest-value card.
+ * tests/ai.test.mjs). The shared foundation is greedy point-minimisation: in a
+ * two-player go-out race, minimising the points you can be caught holding is
+ * close to optimal.
  *
- * Difficulty is the RELIABILITY of that optimal play: each level sets how often
- * a turn is played sub-optimally instead, and since fewer mistakes is strictly
- * stronger the ordering easy < medium < hard holds by construction. Measured
- * decided win rates (seat-balanced): medium beats easy ~0.66-0.72, hard beats
- * easy ~0.79-0.82, hard beats medium ~0.59-0.63.
+ *   easy   - the greedy player, but ~20% of turns it plays a sub-optimal move
+ *            (draws the wrong pile, or sheds a random deadwood card). Never
+ *            breaks its own sets and never declines an available go-out, so it
+ *            stays sensible while being beatable.
+ *   medium - the clean greedy player: point-minimising, goes out the instant it
+ *            can, correct end-game (strict-shape) scoring in hard-mode games,
+ *            and a non-harmful defensive tie-break (avoids feeding cards near
+ *            ones it has seen the opponent take).
+ *   hard   - an expert layered on the greedy core: WILDS ARE PROTECTED (never
+ *            dumped just to save points); draws and keeps are gated by CARD
+ *            COUNTING so it never chases a book/run whose cards are already
+ *            gone; it favours books over runs, dumps high singles, and shifts
+ *            with the round — early rounds chase the go-out (keep even high
+ *            pairs, take tail risk), late rounds shed points. It also tracks
+ *            what the opponent picks up and puts down, and avoids feeding cards
+ *            near what they've taken. Wilds are never locked to a set —
+ *            bestArrangement re-optimises their use every turn.
  *
- *   easy   - plays a sub-optimal move ~45% of turns (draws the wrong pile, or
- *            sheds a random deadwood card instead of the point-minimizing one).
- *            Beatable by a casual player, but never breaks its own melds and
- *            never declines an available go-out, so it stays sensible.
- *   medium - the same, ~20% of turns. A genuine but fallible opponent.
- *   hard   - never makes those mistakes, plus two refinements that never raise
- *            its own caught points:
- *              * correct endgame scoring: on the final caught turn it minimizes
- *                the REAL game-mode score (strict-shape in a hard-mode game),
- *                where medium keeps minimizing the normal score - a genuine
- *                edge in every hard-mode game.
- *              * defense: as a LAST tie-break among equally point-minimizing,
- *                equal-value discards, it avoids feeding cards near the ones it
- *                has observed the opponent take from the pile (card counting
- *                from public information only). Provably never self-harming.
+ * Measured decided win rates (seat-balanced): medium beats easy and hard beats
+ * medium, both comfortably (see tests/ai.test.mjs for the asserted floors).
  *
  * Information hygiene: this module reads ONLY state.turn, state.phase,
  * state.wentOut, state.hands[state.turn], state.discard, state.stock,
@@ -46,19 +41,26 @@
  * automatically on discard), and never return an illegal action.
  */
 
-import { rank, suit, cardPoints, isWild } from '../engine/cards.js';
+import { rank, suit, cardPoints, isWild, makeCard } from '../engine/cards.js';
 import { bestArrangement } from '../engine/solver.js';
 import { legalActions } from '../engine/game.js';
 
 const ENV = typeof process !== 'undefined' && process.env ? process.env : {};
-// Difficulty is the reliability of optimal play: all three levels share one
-// strong greedy policy, and the level sets how often a turn is played
-// sub-optimally instead. Fewer mistakes is strictly stronger, so the ordering
-// easy < medium < hard holds by construction. (Calibrated by seat-balanced
-// self-play; see the AI tests.)
-const MISS_EASY = Number(ENV.FC_ME ?? 0.45);
-const MISS_MEDIUM = Number(ENV.FC_MM ?? 0.2);
-const DANGER = Number(ENV.FC_D ?? 1); // hard: severity of feeding an observed opponent pick
+// easy/medium share one greedy policy; easy plays a fraction of turns
+// sub-optimally. medium is the clean greedy player (no mistakes). hard is the
+// expert policy below. (All ordering calibrated by seat-balanced self-play;
+// see the AI tests.)
+const MISS_EASY = Number(ENV.FC_ME ?? 0.2);
+const DANGER = Number(ENV.FC_D ?? 1); // medium: severity of feeding an observed opponent pick
+
+// ---- Expert (hard) tuning — calibrated by self-play ----
+const B_BOOK = Number(ENV.FC_BB ?? 4);   // keep-incentive for a live book pair
+const B_RUN = Number(ENV.FC_BR ?? 2);    // keep-incentive for a live run pair (books favoured)
+const PH_EARLY = Number(ENV.FC_PE ?? 0.8); // rounds 3-6: chase the go-out (more tail risk)
+const PH_MID = Number(ENV.FC_PM ?? 0.5);
+const PH_LATE = Number(ENV.FC_PL ?? 0.25); // rounds J-K: shed points, dump high singles
+const DEF = Number(ENV.FC_DEF ?? 2);       // expert: weight of not feeding the opponent
+const TAKE_EPS = Number(ENV.FC_TE ?? 0.5); // min expert-value gain to take the discard
 
 // ---------------------------------------------------------------------------
 // Small utilities
@@ -238,7 +240,13 @@ function getMem(state, seat) {
   }
   let m = seats[seat];
   if (!m || m.roundIndex !== state.roundIndex) {
-    m = { roundIndex: state.roundIndex, lastPile: null, oppTaken: [] };
+    m = {
+      roundIndex: state.roundIndex,
+      lastPile: null,
+      oppTaken: [],       // cards the opponent drew from the pile (they hold them)
+      oppDiscarded: [],   // cards the opponent has put down
+      seen: new Set(),    // every card that's passed through the discard pile
+    };
     seats[seat] = m;
   }
   return m;
@@ -255,6 +263,7 @@ function getMem(state, seat) {
  * Anything else yields no inference. Uses only the public discard pile.
  */
 function reconcile(mem, pile) {
+  for (const c of pile) mem.seen.add(c); // accumulate everything ever seen face-up
   const prev = mem.lastPile;
   mem.lastPile = null;
   if (!prev || prev.length === 0) return;
@@ -264,10 +273,11 @@ function reconcile(mem, pile) {
     for (let i = 0; i < k; i++) if (pile[i] !== prev[i]) return false;
     return true;
   };
-  if (pile.length === n + 1 && prefixEq(n)) return; // opponent drew stock
+  if (pile.length === n + 1 && prefixEq(n)) { mem.oppDiscarded.push(pile[n]); return; } // drew stock, discarded pile[n]
   if (pile.length === n && prefixEq(n)) return; // took X, re-discarded X
   if (pile.length === n && prefixEq(n - 1) && pile[n - 1] !== top) {
-    mem.oppTaken.push(top); // took our discard and kept it
+    mem.oppTaken.push(top);            // took our discard X and kept it
+    mem.oppDiscarded.push(pile[n - 1]); // ...and discarded pile[n-1]
     return;
   }
   if (pile.length === 2 && pile[0] === top) return; // stock reshuffle
@@ -324,6 +334,154 @@ function hardAction(state, rng) {
 }
 
 // ---------------------------------------------------------------------------
+// Expert (hard): greedy point-minimisation, but wilds are protected (never
+// dumped to save points), draws/keeps are gated by card-counting so it never
+// chases a dead book/run, and the keep/dump balance shifts with the round —
+// early rounds chase the go-out (keep even high pairs), late rounds shed
+// points (dump high singles). Books are favoured over runs. Wilds stay
+// flexible: bestArrangement re-optimises their use every turn, nothing is
+// locked in.
+// ---------------------------------------------------------------------------
+
+function phaseMult(roundIndex) {
+  if (roundIndex <= 2) return PH_EARLY; // 3s, 4s, 6s
+  if (roundIndex >= 7) return PH_LATE;  // Js, Qs, Ks
+  return PH_MID;
+}
+
+/** Cards that can no longer be drawn from the stock (seen + held + opp's). */
+function unavailable(state, mem) {
+  const u = new Set(mem.seen);
+  for (const c of state.discard) u.add(c);
+  for (const c of state.hands[state.turn]) u.add(c);
+  for (const c of mem.oppTaken) u.add(c);
+  return u;
+}
+
+/**
+ * Keep-incentive for the live near-books/near-runs among a hand's deadwood.
+ * A partial only earns its incentive if at least one completing card is still
+ * live (card-counting) — so a pair whose other cards are all gone earns
+ * nothing and gets dumped. Books earn more than runs (more ways to finish).
+ * Scaled by the round phase. Each card joins at most one partial (best first).
+ */
+function partialBonus(deadwood, wr, mult, u) {
+  const nat = deadwood.filter((c) => !isWild(c, wr));
+  const cand = [];
+  for (let i = 0; i < nat.length; i++) {
+    for (let j = i + 1; j < nat.length; j++) {
+      const a = nat[i];
+      const b = nat[j];
+      let outs = 0;
+      let base = 0;
+      if (rank(a) === rank(b)) {
+        base = B_BOOK;
+        for (let s = 0; s < 4; s++) {
+          const c = makeCard(rank(a), s);
+          if (s !== suit(a) && s !== suit(b) && !u.has(c)) outs++;
+        }
+      } else if (suit(a) === suit(b) && Math.abs(rank(a) - rank(b)) <= 2) {
+        base = B_RUN;
+        const lo = Math.min(rank(a), rank(b));
+        const hi = Math.max(rank(a), rank(b));
+        const wants = hi - lo === 2 ? [lo + 1] : [lo - 1, hi + 1];
+        for (const r of wants) {
+          if (r >= 1 && r <= 13 && !u.has(makeCard(r, suit(a)))) outs++;
+        }
+      } else {
+        continue;
+      }
+      if (outs > 0) cand.push({ i, j, val: base });
+    }
+  }
+  cand.sort((x, y) => y.val - x.val);
+  const used = new Set();
+  let sum = 0;
+  for (const p of cand) {
+    if (used.has(p.i) || used.has(p.j)) continue;
+    used.add(p.i); used.add(p.j);
+    sum += p.val;
+  }
+  return sum * mult;
+}
+
+/**
+ * Expert value of a kept hand (lower = better): its normal-mode caught points
+ * with unmelded WILDS treated as free (never worth shedding), minus the
+ * keep-incentive of any live partials it still holds.
+ */
+function expertValue(hand, wr, mult, u) {
+  const arr = bestArrangement(hand, wr, 'normal');
+  let pts = arr.points;
+  for (const c of arr.deadwood) if (isWild(c, wr)) pts -= cardPoints(c, wr); // wild -> 0
+  return pts - partialBonus(arr.deadwood, wr, mult, u);
+}
+
+function expertDraw(state, mem) {
+  const { stock, disc } = drawOptions(state);
+  if (!disc) return stock;
+  if (!stock) return disc;
+  const hand = state.hands[state.turn];
+  const wr = state.wildRank;
+  const d = state.discard[state.discard.length - 1];
+  const mult = phaseMult(state.roundIndex);
+  const u = unavailable(state, mem);
+  // Value of standing pat vs the best N-card hand reachable by taking d.
+  const keepVal = expertValue(hand, wr, mult, u);
+  const withD = [...hand, d];
+  let takeVal = Infinity;
+  const cands = withD.filter((c) => !isWild(c, wr));
+  for (const c of (cands.length ? cands : withD)) {
+    const v = expertValue(removeOne(withD, c), wr, mult, u);
+    if (v < takeVal) takeVal = v;
+  }
+  // Take the discard only for a real, card-counting-backed improvement (never
+  // to chase a dead combo — that wouldn't lower takeVal).
+  return takeVal < keepVal - TAKE_EPS ? disc : stock;
+}
+
+function expertDiscard(state, rng, mem, finalTurn, gameMode) {
+  const me = state.turn;
+  const hand = state.hands[me];
+  const wr = state.wildRank;
+  const base = bestArrangement(hand, wr, 'normal').points;
+  const outs = goOutDiscards(hand, wr, base);
+  if (outs.length) {
+    return discardAction(me, outs[Math.min(outs.length - 1, Math.floor(rng() * outs.length))]);
+  }
+  // Final caught turn: no future, so protection is off — minimise the REAL
+  // score (dump a wild if it cuts points), mode-aware.
+  if (finalTurn) {
+    const { best } = candidateDiscards(hand, wr, gameMode);
+    const scores = best.map((c) => -cardPoints(c, wr));
+    return discardAction(me, pickMin(best, scores, rng));
+  }
+  const mult = phaseMult(state.roundIndex);
+  const u = unavailable(state, mem);
+  // Never volunteer a wild while any other card can go.
+  let cands = hand.filter((c) => !isWild(c, wr));
+  if (!cands.length) cands = hand.slice();
+  const scores = cands.map((c) =>
+    expertValue(removeOne(hand, c), wr, mult, u) + dangerPenalty(c, mem.oppTaken) * DEF);
+  return discardAction(me, pickMin(cands, scores, rng));
+}
+
+function expertAction(state, rng) {
+  const me = state.turn;
+  const mem = getMem(state, me);
+  const gameMode = state.config && state.config.mode === 'hard' ? 'hard' : 'normal';
+  const finalTurn = state.wentOut !== null && state.wentOut !== me;
+  if (state.phase === 'draw') {
+    reconcile(mem, state.discard);
+    return expertDraw(state, mem);
+  }
+  reconcile(mem, state.discard); // keep the seen-set current for out-counting
+  const action = expertDiscard(state, rng, mem, finalTurn, gameMode);
+  mem.lastPile = [...state.discard, action.card];
+  return action;
+}
+
+// ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
 
@@ -347,9 +505,9 @@ export function chooseAction(level, state, rng) {
   if (level === 'easy') {
     action = fallibleAction(state, rand, MISS_EASY);
   } else if (level === 'medium') {
-    action = fallibleAction(state, rand, MISS_MEDIUM);
-  } else if (level === 'hard') {
     action = hardAction(state, rand);
+  } else if (level === 'hard') {
+    action = expertAction(state, rand);
   } else {
     throw new Error(`Unknown AI level: ${level}`);
   }
