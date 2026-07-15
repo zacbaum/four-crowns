@@ -98,12 +98,23 @@ export function displaySet(meld, wildRank) {
   if (distinct.size === 1) {
     return naturals.sort(bySuit).concat(wilds.sort(bySuit));
   }
-  // Run: pick the highest window [lo .. lo+n-1] that still contains every
-  // natural rank and stays within A..K, so spare wilds land at the top.
+  // Run: read highest (left) to lowest (right). The ace plays low unless the
+  // naturals only seat as an ace-high run (Q-K-A), in which case A -> 14 and
+  // shows at the top. Pick the highest window so spare wilds land up top.
   const n = meld.length;
-  const ranks = naturals.map(rank);
-  const lo = Math.min(Math.min(...ranks), 14 - n);
-  const byRank = new Map(naturals.map((c) => [rank(c), c]));
+  const hasAce = naturals.some((c) => rank(c) === 1);
+  const fitsLow = () => {
+    const rr = naturals.map(rank);
+    const mn = Math.min(...rr);
+    const mx = Math.max(...rr);
+    return mx - mn <= n - 1 && Math.max(1, mx - n + 1) <= Math.min(mn, 14 - n);
+  };
+  const aceHigh = hasAce && !fitsLow();
+  const mr = (c) => (aceHigh && rank(c) === 1 ? 14 : rank(c));
+  const bandHi = aceHigh ? 14 : 13;
+  const rr = naturals.map(mr);
+  const lo = Math.min(Math.min(...rr), bandHi - n + 1);
+  const byRank = new Map(naturals.map((c) => [mr(c), c]));
   const spareWilds = wilds.slice().sort(bySuit).reverse(); // ♠ pops first
   const out = [];
   for (let r = lo + n - 1; r >= lo; r--) {
@@ -708,6 +719,8 @@ export function startTable(container, opts) {
     if (!fromRemote) reportLocal(action);
     sel = null;
     render();
+    // Opponent discards fly into the pile too, so both players see it land.
+    if (action.type === 'discard' && action.player !== mySeat) flyOppDiscard(action.card);
     drive();
     return true;
   }
@@ -752,16 +765,18 @@ export function startTable(container, opts) {
     return seatIsLocal && state.phase === 'discard' && state.turn === mySeat;
   }
 
-  function confirmDiscard(id) {
+  function confirmDiscard(id, animate = true) {
     if (!canDiscardNow()) return;
     if (state.hands[mySeat].indexOf(id) === -1) return;
-    // Tapped-in discards fly from the hand to the pile (dragged ones already
-    // move under the finger). Capture the card's screen spot before the
-    // re-render replaces it.
+    // Tapped-in discards fly from the hand to the pile; dragged ones already
+    // moved under the finger, so they pass animate=false. Capture the card's
+    // screen spot before the re-render replaces it.
     let fromRect = null;
-    const row = container.querySelector('.tb-hand');
-    const idx = handOrder.indexOf(id);
-    if (row && idx >= 0 && row.children[idx]) fromRect = row.children[idx].getBoundingClientRect();
+    if (animate) {
+      const row = container.querySelector('.tb-hand');
+      const idx = handOrder.indexOf(id);
+      if (row && idx >= 0 && row.children[idx]) fromRect = row.children[idx].getBoundingClientRect();
+    }
     apply({ type: 'discard', player: mySeat, card: id });
     if (fromRect) flyToDiscard(id, fromRect);
   }
@@ -788,6 +803,26 @@ export function startTable(container, opts) {
     const done = () => clone.remove();
     clone.addEventListener('transitionend', done, { once: true });
     setTimeout(done, 600);
+  }
+
+  /**
+   * Opponent discards fly from their fan into the pile as well, so both players
+   * see the card land (not just whoever discarded). Runs after the re-render,
+   * from a pile-sized clone centred on the opponent fan.
+   */
+  function flyOppDiscard(id) {
+    if (disposed) return;
+    const pile = container.querySelector('.tb-pile-discard');
+    const fan = container.querySelector('.tb-opp-fan');
+    if (!pile || !fan) return;
+    const toRect = (pile.querySelector('.tb-disc-card') || pile).getBoundingClientRect();
+    const fanRect = fan.getBoundingClientRect();
+    flyToDiscard(id, {
+      left: fanRect.left + fanRect.width / 2 - toRect.width / 2,
+      top: fanRect.top + fanRect.height / 2 - toRect.height / 2,
+      width: toRect.width,
+      height: toRect.height,
+    });
   }
 
   function onCardTap(id) {
@@ -941,7 +976,7 @@ export function startTable(container, opts) {
         let acted = false;
         if (e.type === 'pointerup') {
           if (canDiscardNow() && overPile(e, pile)) {
-            confirmDiscard(id); // apply() re-renders on success
+            confirmDiscard(id, false); // dragged: the ghost already animated
             acted = true;
           } else {
             // Reorder — only when released near the hand row, so an aborted

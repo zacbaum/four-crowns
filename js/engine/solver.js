@@ -5,8 +5,9 @@
  * - Group (3-4 cards): all natural cards share one rank; wilds fill the rest.
  *   An all-wild meld is valid.
  * - Run (3-4 cards): naturals share one suit with distinct ranks and fit a
- *   window of consecutive ranks of the meld's size within A..K (A low, no
- *   wraparound); wilds fill the gaps.
+ *   window of consecutive ranks of the meld's size. The Ace plays LOW (A-2-3)
+ *   or HIGH (Q-K-A), but a run never wraps around (K-A-2 is not a run); wilds
+ *   fill the gaps.
  *
  * bestArrangement is provably minimal: it enumerates every valid meld in the
  * hand and runs a memoized DFS over the bitmask of hand indices, at each step
@@ -56,34 +57,50 @@ function isValidMeldIndices(indices, ranks, suits, wildRank) {
   let natSuitSame = true;
   let firstRank = -1;
   let firstSuit = -1;
-  let mn = 99;
-  let mx = -1;
-  let natCount = 0;
-  let dup = false;
-  let seen = 0;
+  let hasAce = false;
+  const nat = [];
   for (const i of indices) {
     const r = ranks[i];
     if (r === wildRank) continue;
-    natCount++;
     if (firstRank === -1) {
       firstRank = r;
       firstSuit = suits[i];
     }
     if (r !== firstRank) natRankSame = false;
     if (suits[i] !== firstSuit) natSuitSame = false;
-    if (seen & (1 << r)) dup = true;
+    if (r === 1) hasAce = true;
+    nat.push(r);
+  }
+  if (nat.length === 0) return true; // all wilds: valid (natural book of the wild rank)
+  if (natRankSame) return true; // book
+  if (!natSuitSame) return false; // run needs one suit
+  // Run: fit a consecutive window of `size`, with the ace low (1..K) or, if an
+  // ace is present, high (A above K = 14). No wraparound — each mapping is a
+  // single contiguous band, so K-A-2 fits neither.
+  return fitsRun(nat, size, false) || (hasAce && fitsRun(nat, size, true));
+}
+
+/**
+ * Do these natural ranks fit some consecutive window of length `size`, wilds
+ * filling the gaps? `aceHigh` maps rank 1 -> 14 and shifts the legal band to
+ * 2..14; otherwise the band is 1..13. Rejects duplicate ranks.
+ */
+function fitsRun(nat, size, aceHigh) {
+  const bandLo = aceHigh ? 2 : 1;
+  const bandHi = aceHigh ? 14 : 13;
+  let mn = 99;
+  let mx = -1;
+  let seen = 0;
+  for (let r of nat) {
+    if (aceHigh && r === 1) r = 14;
+    if (seen & (1 << r)) return false; // duplicate rank
     seen |= 1 << r;
     if (r < mn) mn = r;
     if (r > mx) mx = r;
   }
-  if (natCount === 0) return true; // all wilds: valid (natural group of the wild rank)
-  if (natRankSame) return true; // group
-  if (!natSuitSame || dup) return false; // run needs one suit, distinct ranks
   if (mx - mn > size - 1) return false;
-  // Window [lo .. lo + size - 1] with lo >= 1 and lo + size - 1 <= 13 that
-  // contains every natural rank.
-  const loMin = Math.max(1, mx - size + 1);
-  const loMax = Math.min(mn, 14 - size);
+  const loMin = Math.max(bandLo, mx - size + 1);
+  const loMax = Math.min(mn, bandHi - size + 1);
   return loMin <= loMax;
 }
 

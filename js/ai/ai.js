@@ -387,6 +387,7 @@ function partialBonus(deadwood, wr, mult, u) {
         const wants = hi - lo === 2 ? [lo + 1] : [lo - 1, hi + 1];
         for (const r of wants) {
           if (r >= 1 && r <= 13 && !u.has(makeCard(r, suit(a)))) outs++;
+          else if (r === 14 && !u.has(makeCard(1, suit(a)))) outs++; // ace-high extends a ...K run
         }
       } else {
         continue;
@@ -449,12 +450,27 @@ function expertDiscard(state, rng, mem, finalTurn, gameMode) {
   if (outs.length) {
     return discardAction(me, outs[Math.min(outs.length - 1, Math.floor(rng() * outs.length))]);
   }
-  // Final caught turn: no future, so protection is off — minimise the REAL
-  // score (dump a wild if it cuts points), mode-aware.
+  // Final caught turn: minimise the REAL score (mode-aware). A wild is dumped
+  // ONLY here, and only if it's genuinely the best move — i.e. no non-wild
+  // discard reaches as few points (e.g. a low round where the wild can't join
+  // a set). Otherwise the wild is kept even now.
   if (finalTurn) {
-    const { best } = candidateDiscards(hand, wr, gameMode);
-    const scores = best.map((c) => -cardPoints(c, wr));
-    return discardAction(me, pickMin(best, scores, rng));
+    const pts = (c) => bestArrangement(removeOne(hand, c), wr, gameMode).points;
+    const wilds = hand.filter((c) => isWild(c, wr));
+    const nonWild = hand.filter((c) => !isWild(c, wr));
+    if (!nonWild.length) {
+      return discardAction(me, hand[Math.min(hand.length - 1, Math.floor(rng() * hand.length))]);
+    }
+    let bestNW = Infinity;
+    const nwPts = nonWild.map((c) => { const p = pts(c); if (p < bestNW) bestNW = p; return p; });
+    let bestW = Infinity;
+    for (const c of wilds) { const p = pts(c); if (p < bestW) bestW = p; }
+    if (wilds.length && bestW < bestNW - 1e-9) {
+      return discardAction(me, wilds.find((c) => Math.abs(pts(c) - bestW) < 1e-9));
+    }
+    const tied = nonWild.filter((c, i) => Math.abs(nwPts[i] - bestNW) < 1e-9);
+    const scores = tied.map((c) => -cardPoints(c, wr)); // shed the highest of them
+    return discardAction(me, pickMin(tied, scores, rng));
   }
   const mult = phaseMult(state.roundIndex);
   const u = unavailable(state, mem);

@@ -33,15 +33,22 @@ function refIsValidMeld(cards, wildRank) {
   for (let r = 1; r <= 13; r++) {
     if (nat.every(c => rank(c) === r)) return true;
   }
-  // run: some suit + some window of `size` consecutive ranks fits all naturals
+  // run: some suit + some window of `size` consecutive ranks fits all naturals.
+  // The ace plays low (band 1..13) or, when present, high (ace -> 14, band
+  // 2..14). No wraparound — each band is one contiguous window scan.
   for (let s = 0; s < 4; s++) {
     if (!nat.every(c => suit(c) === s)) continue;
     const rs = nat.map(c => rank(c));
     if (new Set(rs).size !== rs.length) continue;
-    for (let lo = 1; lo + size - 1 <= 13; lo++) {
-      const hi = lo + size - 1;
-      if (rs.every(r => r >= lo && r <= hi)) return true;
-    }
+    const fits = (mapped, bandLo, bandHi) => {
+      for (let lo = bandLo; lo + size - 1 <= bandHi; lo++) {
+        const hi = lo + size - 1;
+        if (mapped.every(r => r >= lo && r <= hi)) return true;
+      }
+      return false;
+    };
+    if (fits(rs, 1, 13)) return true;
+    if (rs.includes(1) && fits(rs.map(r => (r === 1 ? 14 : r)), 2, 14)) return true;
   }
   return false;
 }
@@ -298,12 +305,16 @@ test('all-wild meld is valid', () => {
   assert.equal(bestArrangement(hand, 3, 'hard').points, 0);
 });
 
-test('ace is low only: A-2-3 valid; K-A-2 and Q-K-A invalid', () => {
+test('ace plays low or high but never wraps around', () => {
+  // Low: A-2-3 and A-2-3-4.
   assert.equal(bestArrangement([C(1, SP), C(2, SP), C(3, SP)], 13, 'normal').points, 0);
+  assert.equal(bestArrangement([C(1, SP), C(2, SP), C(3, SP), C(4, SP)], 13, 'normal').points, 0);
+  // High: Q-K-A and J-Q-K-A.
+  assert.equal(bestArrangement([C(12, SP), C(13, SP), C(1, SP)], 6, 'normal').points, 0);
+  assert.equal(bestArrangement([C(11, SP), C(12, SP), C(13, SP), C(1, SP)], 6, 'normal').points, 0);
+  // No wraparound: K-A-2 spans neither band, so nothing melds.
   const kA2 = bestArrangement([C(13, SP), C(1, SP), C(2, SP)], 6, 'normal');
-  assert.equal(kA2.points, 13 + 1 + 2); // nothing melds
-  const qKA = bestArrangement([C(12, SP), C(13, SP), C(1, SP)], 6, 'normal');
-  assert.equal(qKA.points, 12 + 13 + 1); // nothing melds
+  assert.equal(kA2.points, 13 + 1 + 2);
 });
 
 test('5+ card same-suit sequences only meld as multiple 3-4 melds', () => {

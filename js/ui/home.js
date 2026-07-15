@@ -272,8 +272,9 @@ const RULES_HTML = `
       <li><strong>Book</strong> — 3–4 cards of the same rank
       (e.g.&nbsp;9♠&nbsp;9♥&nbsp;9♣). Suits don't matter.</li>
       <li><strong>Run</strong> — 3–4 consecutive ranks in one suit
-      (e.g.&nbsp;8♦&nbsp;9♦&nbsp;10♦). Ace is <em>low only</em>: A-2-3 works,
-      Q-K-A does not. Runs of 5+ are not valid.</li>
+      (e.g.&nbsp;8♦&nbsp;9♦&nbsp;10♦). Ace plays <em>low or high</em>: A-2-3 and
+      Q-K-A both work, but no wraparound (K-A-2 does not). Runs of 5+ are not
+      valid.</li>
     </ul>
     <p>Wilds substitute for any card in a book or run, or count as their
     natural rank. A card can belong to only one set.</p>

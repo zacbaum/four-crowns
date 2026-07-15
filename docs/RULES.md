@@ -8,8 +8,8 @@ all tests. If code disagrees with this file, the code is wrong.
 
 - One standard 52-card deck: ranks A, 2, 3, …, 10, J, Q, K in four suits
   (♠ ♥ ♦ ♣). **No jokers.**
-- Rank order for runs: A is LOW only (A-2-3 is a run start; Q-K-A and K-A-2 are
-  NOT runs — no wraparound).
+- Rank order for runs: A plays LOW or HIGH (A-2-3 and Q-K-A are both runs), but
+  a run never wraps around (K-A-2 is NOT a run).
 
 ## Rounds
 
@@ -48,9 +48,9 @@ Only two set shapes exist, and **every set is exactly 3 or 4 cards**:
    any slots; the natural (non-wild) cards must all share one rank.
 2. **Run**: 3 or 4 consecutive ranks in a **single suit** (e.g. 8♦ 9♦ 10♦).
    Wilds may fill any slots; the naturals must all be the same suit and must fit
-   a window of consecutive ranks of the run's size within A..K (A low, no
-   wraparound). Runs of 5 or more are NOT valid (a 6-card same-suit sequence
-   forms two runs of 3, etc.).
+   a window of consecutive ranks of the run's size. The Ace plays low (A-2-3) or
+   high (Q-K-A), but a run never wraps around (K-A-2 is not a run). Runs of 5 or
+   more are NOT valid (a 6-card same-suit sequence forms two runs of 3, etc.).
 
 A card can belong to at most one set.
 
