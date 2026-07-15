@@ -5,7 +5,7 @@
  * to invalidate; activate cleans old caches.
  */
 
-const CACHE_VERSION = 'v17';
+const CACHE_VERSION = 'v18';
 const CACHE_NAME = `fourcrowns-${CACHE_VERSION}`;
 
 const APP_SHELL = [

@@ -45,7 +45,7 @@ const suitW = (c) => SUIT_WEIGHT[suit(c)];
 function discScatter(cardId) {
   const h = ((cardId + 1) * 2654435761) >>> 0;
   return {
-    rot: ((h % 15) - 7),            // -7°..+7°
+    rot: ((h % 21) - 10),           // -10°..+10°
     dx: (((h >> 5) % 9) - 4),       // -4..+4 px
     dy: (((h >> 10) % 7) - 3),      // -3..+3 px
   };
@@ -443,26 +443,18 @@ const TB_CSS = `
 .tb-insert-before { box-shadow: -3px 0 0 0 var(--gold, #e9c46a); }
 .tb-insert-after { box-shadow: 3px 0 0 0 var(--gold, #e9c46a); }
 
-/* Discard pile: a slightly messy stack (recent cards peek out at their own
-   angles); the top card sits above, and every few discards it squares up. */
+/* Discard pile: a slightly messy stack — recent cards peek out underneath at
+   their own scatter angles and the top card sits above at the angle it landed
+   on. The mess stands for the whole hand; the pile is never tidied/squared. */
 .tb-disc-card:not(.tb-disc-peek) { position: relative; z-index: 1; }
 .tb-disc-peek {
   position: absolute; top: 0; left: 50%;
   margin-left: calc(var(--card-w) * -0.5); z-index: 0;
 }
-@keyframes tb-squareup {
-  0% { transform: rotate(-7deg) translateY(-3px); }
-  55% { transform: rotate(2.5deg); }
-  100% { transform: rotate(0); }
-}
-.tb-squareup { animation: tb-squareup .45s ease-out; }
 /* A card in flight from the hand to the pile (tapped-in discards) */
 .tb-fly {
   position: fixed; z-index: 650; pointer-events: none; margin: 0 !important;
   transition: transform .3s cubic-bezier(.3, .8, .35, 1); will-change: transform;
-}
-@media (prefers-reduced-motion: reduce) {
-  .tb-squareup { animation: none; }
 }
 
 /* The card just drawn: gold glow + slight lift until it's placed/discarded */
@@ -631,8 +623,6 @@ export function startTable(container, opts) {
   // then on it's arranged purely by hand.
   let pure = false;
   try { pure = !!getSettings().pureMode; } catch (e) { /* default assisted */ }
-  // How often the discard pile "squares up" — every 5-10 cards, fixed per game.
-  const squarePeriod = 5 + ((opts.config.seed | 0) % 6 + 6) % 6;
 
   // Resuming: a saved engine state replaces the fresh deal, and the stats
   // record id is reused so finishing later upgrades the same record.
@@ -1060,10 +1050,9 @@ export function startTable(container, opts) {
     if (top === undefined) {
       discBtn.appendChild(el('span', 'tb-pile-empty'));
     } else {
-      // Messy stack: a few recent cards peek out underneath, each at its own
-      // scatter angle. Every `squarePeriod` discards the pile squares itself
-      // up (aligned, with a quick settle animation) — like tidying a real pile.
-      const squareUp = state.discard.length > 0 && state.discard.length % squarePeriod === 0;
+      // Messy stack: a few recent cards peek out underneath, each frozen at
+      // its own scatter angle — the angle it was thrown down at. The pile is
+      // never tidied, so the top card keeps the angle it landed on all hand.
       const recent = state.discard.slice(-4); // bottom..top
       recent.forEach((c, i) => {
         const isTop = i === recent.length - 1;
@@ -1071,9 +1060,8 @@ export function startTable(container, opts) {
         const cardEl = renderCard(c, pure ? {} : { wildRank: state.wildRank });
         cardEl.classList.add('tb-disc-card');
         if (!isTop) cardEl.classList.add('tb-disc-peek');
-        const sc = squareUp ? { rot: 0, dx: 0, dy: 0 } : discScatter(c);
+        const sc = discScatter(c);
         cardEl.style.transform = `translate(${sc.dx}px, ${sc.dy}px) rotate(${sc.rot}deg)`;
-        if (squareUp && isTop) cardEl.classList.add('tb-squareup');
         discBtn.appendChild(cardEl);
       });
     }
